@@ -1,0 +1,183 @@
+---
+title: "DAP_data_hyptest"
+author: "Antoinette Fang"
+date: '2022-07-09'
+output: html_document
+---
+```{r}
+library(Rlab)
+library(glmnet)
+library(tidyverse)
+library(poibin)
+library(PoissonBinomial)
+library(ggplot2)
+library(splitTools)
+library("future.apply")
+library(xlsx)
+```
+
+```{r input cleaned data}
+#input the two cleaned data files from data_cleaning file
+dogDemo<-read.csv(file = "./2021dogDemo.csv", header = T)
+diseaseFreq<-read.csv("./diseaseCode2021.csv", sep = ",", header = T)
+diseaseFreq<-diseaseFreq[,-4]
+diseaseFreq<-cbind(diseaseFreq,colSums(response_var))
+colnames(diseaseFreq)<-c("code", "disease name", "category", "frequency")
+
+#selects out predictive variables
+predict_var<-dogDemo %>%
+  dplyr :: select(dd_age_years,dd_weight_lbs,recode.sex_2,recode.sex_3,recode.sex_4) %>%
+  mutate(mixed.breed = dogDemo$dd_breed_pure_or_mixed-1) 
+
+#selects out response variables
+response_var<- dogDemo %>% 
+  dplyr :: select(starts_with("X"),starts_with("hs_cancer_types"))
+```
+
+
+
+```{r functions}
+#counter
+count<-function(x,y){
+  c<-0
+  for (i in 1:length(x)){
+    if (x[i]==1 && y[i]==1){
+      c<-c+1
+    }
+  }
+  return(c)
+}
+
+#probability generator function
+probgen<-function(x,coefs){
+  model<- -(coefs[2]*x[,1]+coefs[3]*x[,2]+coefs[4]*x[,3]+coefs[5]*x[,4]+coefs[6]*x[,5]+coefs[7]*x[,6]+coefs[1])
+  out<- 1/(1+exp(model))
+  return(out)
+}
+```
+
+
+```{r find the coefficient for each model per disease}
+#finds and return coefs for glm
+general<- function(x,y){
+  general.model<-glm(y~x[,1] + x[,2] + x[,3] + x[,4] + x[,5] + x[,6], family = binomial(link = logit))$coef
+  return(general.model)
+}
+
+gencoef<-future_apply(response_var,2,general, x = predict_var) #this line takes some time to run
+rownames(gencoef)<-c("Intercept", colnames(predict_var))
+
+#matrix of personalized probabilities
+#this gives each dog's probability of having one disease
+gen.probmat<-as.data.frame(future_apply(gencoef,2,probgen,x = predict_var))
+```
+
+
+```{r variance correction}
+#unbiased sample variance function 
+#stratifies data and make model per strata
+bootvar<-function(y){
+  l<-create_folds(y, k =6)
+  out <- vector(mode='list', length=6)
+  for (i in 1:length(l)){
+    pre<-predict_var[l[[i]],]
+    res<-y[l[[i]]]
+    out[[i]]<-glm(res~pre[,1]+pre[,2]+pre[,3]+pre[,4]+pre[,5]+pre[,6], family = binomial(link = logit))$coef
+  }
+  return(out)
+}
+
+#returns stratified model coefficients
+bootcoef<-future_lapply(response_var,bootvar) #this line takes some time to run
+coef1<-lapply(bootcoef,'[[',1)
+coef1<-as.data.frame(do.call(cbind, coef1))
+coef2<-lapply(bootcoef,'[[',2)
+coef2<-as.data.frame(do.call(cbind, coef2))
+coef3<-lapply(bootcoef,'[[',3)
+coef3<-as.data.frame(do.call(cbind, coef3))
+coef4<-lapply(bootcoef,'[[',4)
+coef4<-as.data.frame(do.call(cbind, coef4))
+coef5<-lapply(bootcoef,'[[',5)
+coef5<-as.data.frame(do.call(cbind, coef5))
+coef6<-lapply(bootcoef,'[[',6)
+coef6<-as.data.frame(do.call(cbind, coef6))
+
+#finds personalized probabilities per strata
+p1<-future_apply(coef1,2,probgen,x = predict_var)
+p2<-future_apply(coef2,2,probgen,x = predict_var)
+p3<-future_apply(coef3,2,probgen,x = predict_var)
+p4<-future_apply(coef4,2,probgen,x = predict_var)
+p5<-future_apply(coef5,2,probgen,x = predict_var)
+p6<-future_apply(coef6,2,probgen,x = predict_var)
+
+#finds means of probabilities
+pmean<-(p1+p2+p3+p4+p5+p6)/6
+
+#finds unbiased variance
+uvar<-(1/5)*((p1-pmean^2) + (p2-pmean^2)+ (p3-pmean^2) + (p4-pmean^2) + (p5-pmean^2) + (p6-pmean^2))
+```
+
+
+```{r}
+#hypothesis testing function
+hyptest<-function(pymodel,pzmodel,ady,adz,y,z){
+  test<-count(y,z) #test value
+  totalp<-pymodel*pzmodel #multiplied probability
+  m<-sum(totalp) #expected mean
+  rawvar<-totalp*(1-totalp) #unadjusted var
+  svar<-pymodel^2*ady+pzmodel^2*adz+ady*adz #adjusted var
+  v<-sum(svar+rawvar) #final var
+  out<-1-pnorm(test, mean = m, sd = sqrt(v))
+  return(out)
+}
+#gives us significance levels for each pair of diseases
+#gen p values
+pval<-matrix(nrow=ncol(response_var),ncol=ncol(response_var))
+for (i in 1:ncol(response_var)){
+  for (j in 1:ncol(response_var)){
+    out<-hyptest(gen.probmat[,i],gen.probmat[,j],uvar[,i],uvar[,j], response_var[,i], response_var[,j])
+    pval[i,j]<-out
+  }
+}
+
+#pval adjustment for multiple testing
+plist<-c()
+for (i in 1:(ncol(response_var)-1)){
+  plist<-c(plist,pval[(i+1):ncol(response_var),i])
+}
+bh.gen<-p.adjust(plist, method = "BH")
+
+#matrix of pvals for nodes and edges
+nettable<- matrix(ncol=3,nrow=length(plist))
+h<-c()
+for (i in 1:(ncol(response_var)-1)){
+  h<-c(h,(1+i):ncol(response_var))
+}
+g<-c()
+for (i in 1:(ncol(response_var)-1)){
+  g<-c(g,rep(i,times=(ncol(response_var)-i)))
+}
+nettable[,1]<-g
+nettable[,2]<-h
+nettable[,3]<-bh.gen
+colnames(nettable)<-c("Disease1", "Disease2", "Benjamini-Hochberg p-value")
+```
+
+```{r}
+#function that returns bonf edges and nodes based on significance level
+edges.nodes<-function(siglevel,input){
+  g<-ifelse(input[,3]<siglevel,1,0)
+  mat<-cbind(input,g)
+  edge<-mat[mat[,4]==1,1:2]
+  node<-diseaseFreq[c(edge[,1],edge[,2]),]
+  node <- node %>% distinct(code, .keep_all = TRUE)
+  newedge<-cbind(diseaseFreq[edge[,1],1],diseaseFreq[edge[,2],1])
+  return(list(newedge,node))
+}
+
+#list of containing a matrix of edges and vector of nodes
+#formatted direct input into Cytoscape
+gen.bh0.01<-edges.nodes(0.01,nettable)
+```
+
+
