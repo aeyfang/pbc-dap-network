@@ -1,0 +1,118 @@
+---
+title: "data_cleaning"
+author: "Antoinette Fang"
+date: "2023-05-08"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(stringr)
+library(fastDummies)
+library(miceadds)
+library(tidyverse)
+```
+
+```{r import files}
+#import data files 
+#these files should be obtained from DAP project
+load.Rdata(filename="./DAP_2021_HLES_health_conditions_v1.0.RData", objname = "healthCondition2021")
+load.Rdata(filename = "./DAP_2021_HLES_cancer_conditions_v1.0.RData", objname = "cancerCondition2021")
+load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dogOwner2021")
+codeBook2021<-read.csv(file = "./DAP_2021_CODEBOOK_v1.0.csv")
+
+#disease codes saved in git repo
+diseaseCodes<-read.csv(file = "./diseaseCodes.csv", sep = ",", header = F)
+colnames(diseaseCodes)<-c("codebook", "name", "category", "num")
+```
+
+
+```{r}
+#selects list of non cancerous conditions that have over 60 dogs
+listCondition<-healthCondition2021 %>% 
+  dplyr :: select(dog_id, hs_condition, hs_diagnosis_month, hs_diagnosis_year) %>% 
+  group_by(hs_condition) %>%
+  summarise(n = n()) %>%
+  na.omit()%>%
+  filter(n>=60)
+
+#edits healthCondition to only have dogs with eligible non cancerous conditions
+finalCondition <- healthCondition2021 %>%
+  dplyr :: select(dog_id, hs_condition, hs_diagnosis_month, hs_diagnosis_year) %>%
+  filter(hs_condition %in% listCondition$hs_condition)
+
+#selects cancer conditions that have over 60 dogs
+cancerCondition2021 <- cancerCondition2021 %>% 
+  dplyr :: select(dog_id,hs_initial_diagnosis_year, hs_initial_diagnosis_month, starts_with("hs_cancer_types")) %>%
+  transmute_all(funs(str_replace(., "False", "0"))) %>%
+  transmute_all(funs(str_replace(., "True", "1"))) %>%
+  mutate(across(!hs_cancer_types_other_description,as.numeric))
+
+#edits cancerCondition to only have dogs with eligible cancers
+finalCancer<-cancerCondition2021 %>% 
+  dplyr :: select_if(negate(function(col) is.numeric(col) && sum(col) < 60))%>%
+  filter(!grepl("benign|not cancer|no cancer|non cancerous|non-cancerous|fatty tumor|non malignant|non-malignant|not malignant|not known|don't know|unknown|NON|not|non|no", hs_cancer_types_other_description, ignore.case = TRUE))%>%
+  filter(rowSums(.[,c(4:(ncol(.)-1))])>0) 
+
+cancercount<-ncol(finalCancer)-4 #number of cancer conditions
+
+#edits diseaseCodes to include only final conditions
+diseaseCodes <- diseaseCodes %>% filter(diseaseCodes$codebook %in% finalCondition$hs_condition | diseaseCodes$codebook %in% colnames(finalCancer))
+
+#selects dogs that have an eligible cancerous or noncancerous condition
+dogDemo<-dogOwner2021 %>% 
+  dplyr :: select(dog_id, dd_age_years, dd_weight_lbs, dd_spayed_or_neutered, dd_sex, dd_breed_pure, dd_breed_pure_or_mixed)  %>%
+  filter(dog_id %in% finalCancer$dog_id | dog_id %in% finalCondition$dog_id)
+```
+
+
+```{r}
+#generates data frame to fill in each dog's disease info
+addcol<-data.frame(matrix(ncol = nrow(diseaseCodes)+1,nrow = nrow(dogDemo)))
+colnames(addcol) <- c("dog_id",diseaseCodes$codebook)
+addcol$dog_id<-dogDemo$dog_id
+
+#fills in noncancer columns
+for (i in 2:(ncol(addcol)-(cancercount))){ 
+  test <- finalCondition %>% filter(hs_condition == as.numeric(colnames(addcol)[i]))
+  index <- which(addcol$dog_id %in% test$dog_id)
+  addcol[index,i]<-1
+}
+
+#fill in cancer columns
+for (i in (ncol(addcol)-cancercount+1):ncol(addcol)){ 
+  col <- which(colnames(finalCancer) == colnames(addcol)[i])
+  test <- finalCancer %>% filter(.[,col] == 1)
+  index <- which(addcol$dog_id %in% test$dog_id)
+  addcol[index,i]<-1
+}
+
+addcol[is.na(addcol)] <- 0 #fill in remaining with 0
+dogDemo<-cbind(dogDemo,addcol[2:ncol(addcol)]) #bind onto demo data frame
+```
+
+
+```{r}
+#creating dummy variables for sex
+dogDemo<- dogDemo %>%
+  mutate(male = ifelse(dogDemo$dd_sex == 1,1,0),
+         yes_spayed_neutered = ifelse(dogDemo$dd_spayed_or_neutered== "True", 1,0)) %>%
+  mutate(recode.sex = case_when(male ==0 & yes_spayed_neutered ==0 ~ 1, # female, unspayed
+                                male ==0 & yes_spayed_neutered ==1 ~ 2, # female, spayed
+                                male ==1 & yes_spayed_neutered ==0 ~ 3, # male, unneutered
+                                male ==1 & yes_spayed_neutered ==1 ~ 4)) # male, neutered
+dogDemo<-dummy_cols(dogDemo,select_columns = "recode.sex")
+
+#creating dummy variables for breed
+dogDemo$dd_breed_pure[is.na(dogDemo$dd_breed_pure)] = 0
+dogDemo<-dummy_cols(dogDemo,select_columns = "dd_breed_pure")
+```
+
+
+
+
+
+
+
+
+
