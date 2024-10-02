@@ -1,0 +1,176 @@
+---
+title: "data_summary"
+author: "Antoinette Fang"
+date: "2024-07-20"
+output: html_document
+---
+
+```{r load packages}
+library(ggplot2)
+library(dplyr)
+library(gt)
+library(gtsummary)
+library(webshot2)
+```
+
+```{r import data}
+cleaned_dog_data<-read.csv(file = "cleaned_dog_data.csv")
+disease_frequencies<-read.csv(file = "disease_frequencies.csv")
+```
+
+```{r age and weight histograms}
+# Age Distribution Histogram
+age_histogram <- ggplot(cleaned_dog_data, aes(x = dd_age_years)) +
+  geom_histogram(binwidth = 2, color = "#F4F4F4", fill = "#1B365D")+
+  xlab("Age (years)") +
+  ylab("Frequency") +
+  theme_minimal()
+
+print(age_histogram)
+
+ggsave("./summary statistics/age_distribution.png", age_histogram, 
+       width = 10, height = 8, dpi = 600)
+
+# Weight Distribution Histogram
+weight_histogram <- ggplot(cleaned_dog_data, aes(x = dd_weight_lbs)) +
+  geom_histogram(binwidth = 15, color = "#F4F4F4", fill = "#00ABC8")  +
+  xlab("Weight (lbs)") +
+  ylab("Frequency") +
+  theme_minimal()
+
+print(weight_histogram)
+
+ggsave("./summary statistics/weight_distribution.png", weight_histogram, 
+       width = 10, height = 8, dpi = 600)
+
+```
+
+```{r create table 1}
+# Create the table
+table1 <- cleaned_dog_data %>%
+  select(recode.sex_2, recode.sex_3, recode.sex_4, dd_breed_pure_or_mixed, dd_age_years, dd_weight_lbs) %>%
+  mutate(
+    sex = case_when(
+      recode.sex_2 == 1 ~ "Female, spayed",
+      recode.sex_3 == 1 ~ "Male, unneutered",
+      recode.sex_4 == 1 ~ "Male, neutered",
+      TRUE ~ "Female, unspayed"
+    ),
+    breed = ifelse(dd_breed_pure_or_mixed == 0, "Purebred", "Mixed breed")
+  ) %>%
+  select(sex, breed, dd_age_years, dd_weight_lbs) %>%
+  tbl_summary(
+    by = NULL,
+    statistic = list(
+      all_categorical() ~ "{n} ({p}%)",
+      all_continuous() ~ "{median} [{p25}, {p75}]"
+    ),
+    label = list(
+      sex ~ "Sex",
+      breed ~ "Breed",
+      dd_age_years ~ "Age (years)",
+      dd_weight_lbs ~ "Weight (lbs)"
+    ),
+    digits = all_continuous() ~ 1
+  ) %>%
+  modify_header(label = "**Characteristic**") 
+
+# Display the table in R
+print(table1)
+
+# Convert to gt object
+table1_gt <- table1 %>% as_gt()
+
+# Save the table as a PNG file
+gtsave(
+  table1_gt, 
+  filename = "./summary statistics/table1_descriptive_stats.png",
+  expand = 2 # Adjust this value to change the size of the output image
+)
+```
+```{r histogram of disease categories}
+# Prepare the data
+disease_category_summary <- disease_frequencies %>%
+  group_by(Disease.Category) %>%
+  summarise(Total_Frequency = sum(frequency)) %>%
+  arrange(desc(Total_Frequency))
+
+# Create the bar plot
+disease_category_plot <- ggplot(disease_category_summary, aes(x = reorder(Disease.Category, -Total_Frequency), y = Total_Frequency)) +
+  geom_bar(stat = "identity", fill = "#1B365D", color = "#F4F4F4") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+       x = "Disease Category",
+       y = "Total Frequency") +
+  scale_y_continuous(labels = scales::comma)
+
+# Print the plot
+print(disease_category_plot)
+
+# Save the plot
+ggsave("./summary statistics/disease_category_distribution.png", 
+       disease_category_plot, 
+       width = 12, 
+       height = 8, 
+       dpi = 600)
+```
+
+```{r histogram of top 20 diseases}
+# Prepare the data
+top_20_diseases <- disease_frequencies %>%
+  arrange(desc(frequency)) %>%
+  top_n(20, frequency)
+
+# Create the bar plot
+top_20_diseases_plot <- ggplot(top_20_diseases, aes(x = reorder(Disease.Name, frequency), y = frequency)) +
+  geom_bar(stat = "identity", fill = "#1B365D", color = "#F4F4F4") +
+  coord_flip() +  # Flip coordinates to make it a horizontal bar plot
+  theme_minimal() +
+  labs(
+       x = "Disease",
+       y = "Frequency") +
+  scale_y_continuous(labels = scales::comma) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.title = element_text(size = 12, face = "bold")
+  )
+
+# Print the plot
+print(top_20_diseases_plot)
+
+# Save the plot
+ggsave("./summary statistics/top_20_diseases_distribution.png", 
+       top_20_diseases_plot, 
+       width = 12, 
+       height = 8, 
+       dpi = 600)
+```
+
+```{r plot individual disease totals}
+# Histogram
+total_diseases_histogram <- ggplot(cleaned_dog_data, aes(x = total_diseases)) +
+  geom_histogram(binwidth = 1, color = "#F4F4F4", fill = "#1B365D") +
+  theme_minimal() +
+  labs(x = "Number of Diseases",
+       y = "Frequency") +
+  scale_x_continuous(breaks = seq(0, max(cleaned_dog_data$total_diseases), by = 2)) +
+  scale_y_continuous(labels = scales::comma) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10)
+  )
+
+# Print the plot
+print(total_diseases_histogram)
+
+# Save the plot
+ggsave("./summary statistics/total_diseases_distribution.png", 
+       total_diseases_histogram, 
+       width = 12, 
+       height = 8, 
+       dpi = 600)
+```
+

@@ -1,0 +1,178 @@
+---
+title: "data_clean"
+author: "Antoinette Fang"
+date: "2024-07-13"
+output: html_document
+---
+
+```{r packages}
+library(dplyr)
+library(stringr)
+library(fastDummies)
+library(miceadds)
+library(tidyverse)
+library(haven)
+```
+
+```{r import files}
+#these files should be obtained from DAP project
+load.Rdata(filename="./DAP_2021_HLES_health_conditions_v1.0.RData", objname = "health_condition")
+load.Rdata(filename = "./DAP_2021_HLES_cancer_conditions_v1.0.RData", objname = "cancer_condition")
+load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dog_owner")
+
+#this file is in GitHub
+disease_code<-read.csv(file = "./diseaseCodes.csv")
+```
+
+```{r process and merge data frames}
+# Process dog_owner dataframe
+dog_owner <- dog_owner %>%
+  select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered) %>%
+  mutate(
+    dog_id = as.character(dog_id),
+    dd_age_years = as.numeric(dd_age_years),
+    dd_weight_lbs = as.numeric(dd_weight_lbs),
+    dd_breed_pure_or_mixed = dd_breed_pure_or_mixed - 1,
+    recode.sex = case_when(
+      dd_sex == 2 & dd_spayed_or_neutered == "False" ~ 1, #female, unspayed
+      dd_sex == 2 & dd_spayed_or_neutered == "True" ~ 2, #female, spayed
+      dd_sex == 1 & dd_spayed_or_neutered == "False" ~ 3, #male, unneutered
+      dd_sex == 1 & dd_spayed_or_neutered == "True" ~ 4 # male, neutered
+    ),
+    weight_kg = dd_weight_lbs * 0.453592,  # Convert lbs to kg
+    weight_class = case_when(
+      weight_kg < 10 ~ "toy/small",
+      weight_kg < 20 ~ "medium",
+      weight_kg < 30 ~ "standard",
+      weight_kg < 40 ~ "large",
+      TRUE ~ "giant"
+    ),
+    lifestage = case_when(
+      (weight_class %in% c("toy/small", "medium", "standard") & dd_age_years <= 0.75) |
+      (weight_class == "large" & dd_age_years <= 1) |
+      (weight_class == "giant" & dd_age_years <= 1.5) ~ "puppy",
+      (weight_class %in% c("toy/small", "medium", "standard") & dd_age_years > 0.75 & dd_age_years <= 3) |
+      (weight_class == "large" & dd_age_years > 1 & dd_age_years <= 3) |
+      (weight_class == "giant" & dd_age_years > 1.5 & dd_age_years <= 3) ~ "young adult",
+      (weight_class %in% c("toy/small", "medium") & dd_age_years > 3 & dd_age_years <= 12) |
+      (weight_class == "standard" & dd_age_years > 3 & dd_age_years <= 11) |
+      (weight_class == "large" & dd_age_years > 3 & dd_age_years <= 10.5) |
+      (weight_class == "giant" & dd_age_years > 3 & dd_age_years <= 9.5) ~ "mature adult",
+      (weight_class %in% c("toy/small", "medium") & dd_age_years > 12) |
+      (weight_class == "standard" & dd_age_years > 11) |
+      (weight_class == "large" & dd_age_years > 10.5) |
+      (weight_class == "giant" & dd_age_years > 9.5) ~ "senior",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(-dd_sex, -dd_spayed_or_neutered) %>% #remove original spay/neuter and sex columns
+  dummy_cols(select_columns = "recode.sex", remove_first_dummy = TRUE)
+
+# For cancer_condition dataframe
+cancer_condition <- cancer_condition %>%
+  filter(!str_detect(tolower(hs_cancer_types_other_description), 
+                     "benign|not cancer|no cancer|non cancerous|non-cancerous|fatty tumor|non malignant|non-malignant|not malignant|not known|don't know|unknown|not|non|no") |
+           is.na(hs_cancer_types_other_description)) %>%
+  select(dog_id, hs_initial_diagnosis_year, hs_initial_diagnosis_month, 
+         starts_with("hs_cancer_types")) %>%
+  select(-hs_cancer_types_other_description) %>%
+  mutate(dog_id = as.character(dog_id))
+
+# Convert "true" to 1 and "false" to 0 for all hs_cancer_types columns
+cancer_condition <- cancer_condition %>%
+  mutate(across(starts_with("hs_cancer_types"), 
+                ~case_when(
+                  tolower(as.character(.)) %in% c("true", "1") ~ 1,
+                  tolower(as.character(.)) %in% c("false", "0") ~ 0,
+                  is.na(.) ~ 0,
+                  TRUE ~ NA_real_
+                )))
+
+# Convert labelled columns to numeric
+cancer_condition <- cancer_condition %>%
+  mutate(across(starts_with("hs_cancer_types"), 
+                ~as.numeric(as.character(.))))
+
+# For health_condition dataframe
+health_condition_wide <- health_condition %>%
+  filter(!is.na(hs_condition)) %>%
+  select(dog_id, hs_condition) %>%
+  distinct() %>%
+  mutate(present = 1,
+         dog_id = as.character(dog_id)) %>% 
+  pivot_wider(
+    id_cols = dog_id,
+    names_from = hs_condition,
+    names_prefix = "condition_",
+    values_from = present,
+    values_fill = 0
+  ) %>%
+  mutate(across(everything(), ~replace_na(., 0))) %>%
+  {
+    condition_cols <- grep("^condition_", names(.), value = TRUE)
+    sorted_condition_cols <- sort(as.numeric(sub("^condition_", "", condition_cols)))
+    sorted_condition_cols <- paste0("condition_", sorted_condition_cols)
+    
+    select(., dog_id, all_of(sorted_condition_cols), everything())
+  }
+
+# Merge datasets
+merged_data <- dog_owner %>%
+  left_join(cancer_condition, by = "dog_id") %>%
+  left_join(health_condition_wide, by = "dog_id")
+
+# Replace all NA values with 0
+merged_data <- merged_data %>%
+  mutate(across(everything(), ~replace_na(., 0)))
+
+# Identify columns with more than 60 dogs
+disease_columns <- merged_data %>%
+  select(starts_with("hs_cancer_types"), starts_with("condition_")) %>%
+  names()
+
+columns_to_keep <- disease_columns[colSums(merged_data[, disease_columns] == 1, na.rm = TRUE) >= 60]
+
+# Keep only the identified columns and the original dog_owner columns
+columns_to_keep <- c(names(dog_owner), "hs_initial_diagnosis_year", "hs_initial_diagnosis_month", columns_to_keep)
+merged_data <- merged_data %>% select(all_of(columns_to_keep))
+
+# Remove dogs with no diseases
+merged_data <- merged_data %>%
+  filter(if_any(c(starts_with("hs_cancer_types"), starts_with("condition_")), ~. == 1)) %>%
+  mutate(
+    total_diseases = rowSums(select(., starts_with("condition_") | starts_with("hs_cancer_")))
+  )
+
+write.csv(merged_data, "./cleaned_dog_data.csv", row.names = FALSE)
+```
+
+
+```{r amend codebook}
+# Calculate disease frequency
+raw_disease_counts <- merged_data %>%
+  select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
+  summarise(across(everything(), sum)) %>%
+  pivot_longer(everything(), names_to = "code", values_to = "frequency") %>%
+  mutate(code = str_remove(code, "condition_"))
+
+# Merge frequency data with disease_codes
+disease_frequencies <- disease_code %>%
+  inner_join(raw_disease_counts, by = c("Code.from.DAP.data" = "code")) %>%
+  select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency')
+
+# Write the disease frequencies to a new CSV file
+write.csv(disease_frequencies, "disease_frequencies.csv")
+```
+
+```{r stratify data by lifestage}
+# Split the merged dataset into four strata by lifestage
+lifestage_strata <- merged_data %>%
+  group_by(lifestage) %>%
+  group_split()
+
+# Name each stratum
+names(lifestage_strata) <- c("mature_adult", "puppy", "senior", "young_adult")
+
+# Write each stratum to a separate CSV file
+walk2(names(lifestage_strata), lifestage_strata, ~write_csv(.y, paste0("cleaned_strata_", .x, ".csv")))
+``

@@ -1,0 +1,88 @@
+---
+title: "result_analysis"
+author: "Antoinette Fang"
+date: "2024-08-23"
+output: html_document
+---
+
+```{r}
+# Load required libraries
+library(readr)
+library(dplyr)
+library(tidyr)
+
+# Read the CSV files
+unstratified_data <- read_csv("formatted_pairs.csv")
+puppy_data <- read_csv("formatted_pairs_puppy.csv")
+young_adult_data <- read_csv("formatted_pairs_young_adult.csv")
+mature_adult_data <- read_csv("formatted_pairs_mature_adult.csv")
+senior_data <- read_csv("formatted_pairs_senior.csv")
+
+# Function to standardize edge representation
+standardize_edges <- function(df) {
+  df %>%
+    mutate(across(everything(), as.character)) %>%
+    mutate(edge = paste0(pmin(Disease1, Disease2), "-", pmax(Disease1, Disease2))) %>%
+    pull(edge) %>%
+    unique()
+}
+
+# Standardize edges for each dataset
+unstratified_edges <- standardize_edges(unstratified_data)
+puppy_edges <- standardize_edges(puppy_data)
+young_adult_edges <- standardize_edges(young_adult_data)
+mature_adult_edges <- standardize_edges(mature_adult_data)
+senior_edges <- standardize_edges(senior_data)
+
+# Create a list of all edge sets
+all_edge_sets <- list(
+  unstratified = unstratified_edges,
+  puppy = puppy_edges,
+  young_adult = young_adult_edges,
+  mature_adult = mature_adult_edges,
+  senior = senior_edges
+)
+
+# Function to count shared edges
+count_shared_edges <- function(set1, set2) {
+  length(intersect(set1, set2))
+}
+
+# Create the matrix
+result_matrix <- matrix(0, nrow = 5, ncol = 5)
+rownames(result_matrix) <- colnames(result_matrix) <- names(all_edge_sets)
+
+for (i in 1:5) {
+  for (j in 1:5) {
+    result_matrix[i, j] <- count_shared_edges(all_edge_sets[[i]], all_edge_sets[[j]])
+  }
+}
+
+# Convert to a data frame for better printing
+result_df <- as.data.frame(result_matrix)
+result_df$category <- rownames(result_df)
+result_df <- result_df %>% select(category, everything())
+
+# Print the result
+print(result_df, row.names = FALSE)
+
+# Create a heatmap visualization
+library(ggplot2)
+
+result_long <- result_df %>%
+  pivot_longer(cols = -category, names_to = "comparison", values_to = "shared_edges")
+
+ggplot(result_long, aes(x = category, y = comparison, fill = shared_edges)) +
+  geom_tile() +
+  geom_text(aes(label = shared_edges), color = "white", size = 4) +
+  scale_fill_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(title = "Shared Edges Between Networks",
+       x = "Network", y = "Network",
+       fill = "Shared Edges") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save the plot
+ggsave("shared_edges_heatmap.png", width = 10, height = 8)
+```
+
