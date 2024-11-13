@@ -10,33 +10,49 @@ output: html_document
 library(readr)
 library(dplyr)
 library(tidyr)
+library(readxl)
+library(ggplot2)
+library(poweRlaw)
+library(fitdistrplus)
+library(stringr)
+```
 
-# Read the CSV files
-unstratified_data <- read_csv("formatted_pairs.csv")
-puppy_data <- read_csv("formatted_pairs_puppy.csv")
-young_adult_data <- read_csv("formatted_pairs_young_adult.csv")
-mature_adult_data <- read_csv("formatted_pairs_mature_adult.csv")
-senior_data <- read_csv("formatted_pairs_senior.csv")
-
-# Function to standardize edge representation
-standardize_edges <- function(df) {
-  df %>%
-    mutate(across(everything(), as.character)) %>%
-    mutate(edge = paste0(pmin(Disease1, Disease2), "-", pmax(Disease1, Disease2))) %>%
-    pull(edge) %>%
+```{r}
+# Heatmap of overlapping edges
+# Function to extract edge pairs from the name column
+extract_edges <- function(df) {
+  df$name %>%
+    str_extract_all("\\d+") %>%
+    lapply(function(x) {
+      if(length(x) >= 2) {
+        # Sort the numbers to standardize edge representation
+        sorted_nums <- sort(as.numeric(x[1:2]))
+        paste(sorted_nums[1], sorted_nums[2], sep="-")
+      }
+    }) %>%
+    unlist() %>%
     unique()
 }
 
-# Standardize edges for each dataset
-unstratified_edges <- standardize_edges(unstratified_data)
-puppy_edges <- standardize_edges(puppy_data)
-young_adult_edges <- standardize_edges(young_adult_data)
-mature_adult_edges <- standardize_edges(mature_adult_data)
-senior_edges <- standardize_edges(senior_data)
+# Read and process each dataset
+undirected_edges <- read.csv("./network attributes/undirected_edge_attributes.csv", stringsAsFactors = FALSE) %>%
+  extract_edges()
+
+mature_adult_edges <- read.csv("./network attributes/mature_adult_edge_attributes.csv", stringsAsFactors = FALSE) %>%
+  extract_edges()
+
+senior_edges <- read.csv("./network attributes/senior_edge_attributes.csv", stringsAsFactors = FALSE) %>%
+  extract_edges()
+
+young_adult_edges <- read.csv("./network attributes/young_adult_edge_attributes.csv", stringsAsFactors = FALSE) %>%
+  extract_edges()
+
+# Create empty set for puppy (no edges)
+puppy_edges <- character(0)
 
 # Create a list of all edge sets
 all_edge_sets <- list(
-  unstratified = unstratified_edges,
+  undirected = undirected_edges,
   puppy = puppy_edges,
   young_adult = young_adult_edges,
   mature_adult = mature_adult_edges,
@@ -58,31 +74,319 @@ for (i in 1:5) {
   }
 }
 
-# Convert to a data frame for better printing
+# Convert to a data frame
 result_df <- as.data.frame(result_matrix)
 result_df$category <- rownames(result_df)
-result_df <- result_df %>% select(category, everything())
 
-# Print the result
-print(result_df, row.names = FALSE)
+# Define the desired order
+desired_order <- c("undirected", "puppy", "young_adult", "mature_adult", "senior")
 
-# Create a heatmap visualization
-library(ggplot2)
+# Reorder the result_df
+result_df <- result_df %>%
+  mutate(category = factor(category, levels = desired_order)) %>%
+  dplyr::select(category, all_of(desired_order))
 
+# Create a long format dataframe for ggplot
 result_long <- result_df %>%
-  pivot_longer(cols = -category, names_to = "comparison", values_to = "shared_edges")
+  pivot_longer(cols = -category, names_to = "comparison", values_to = "shared_edges") %>%
+  mutate(comparison = factor(comparison, levels = desired_order))
 
-ggplot(result_long, aes(x = category, y = comparison, fill = shared_edges)) +
-  geom_tile() +
-  geom_text(aes(label = shared_edges), color = "white", size = 4) +
-  scale_fill_gradient(low = "blue", high = "red") +
+# Filter for lower triangle and diagonal
+result_long_lower <- result_long %>%
+  filter(as.numeric(factor(category)) <= as.numeric(factor(comparison)))
+
+# Create the heatmap
+ggplot(result_long_lower, aes(x = category, y = comparison, fill = shared_edges)) +
+  geom_tile(color = "black", linewidth = 0.5) +
+  geom_text(aes(label = shared_edges), color = "black", size = 4) +
+  scale_fill_gradient(low = "#ffffff", high = "#00abc8") +
   theme_minimal() +
-  labs(title = "Shared Edges Between Networks",
-       x = "Network", y = "Network",
-       fill = "Shared Edges") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  labs(fill = "Shared Edges") +
+  theme(
+    axis.text.x.top = element_text(angle = 45, hjust = 0, size = 12),
+    axis.text.y = element_text(hjust = 1, size = 12),
+    axis.title = element_blank(),
+    axis.title.x.top = element_blank(),
+    axis.ticks.x.top = element_line(),
+    axis.ticks.x.bottom = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank(),
+    aspect.ratio = 1
+  ) +
+  scale_x_discrete(
+    limits = desired_order,
+    position = "top",
+    labels = c("unstratified", "puppy", "young adult", "mature adult", "senior")
+  ) +
+  scale_y_discrete(
+    limits = rev(desired_order),
+    labels = rev(c("unstratified", "puppy", "young adult", "mature adult", "senior"))
+  ) +
+  coord_fixed()
 
-# Save the plot
-ggsave("shared_edges_heatmap.png", width = 10, height = 8)
+# Save the updated plot
+ggsave("./results images/shared_edges_heatmap.png", width = 6, height = 6, dpi = 600)
+```
+
+
+```{r}
+# Function to extract edge pairs from the name column
+extract_edges <- function(df) {
+  df$name %>%
+    str_extract_all("\\d+") %>%
+    lapply(function(x) {
+      if(length(x) >= 2) {
+        # Sort the numbers to standardize edge representation
+        sorted_nums <- sort(as.numeric(x[1:2]))
+        paste(sorted_nums[1], sorted_nums[2], sep="-")
+      }
+    }) %>%
+    unlist() %>%
+    unique()
+}
+
+# Find edges present in all networks
+shared_edges <- Reduce(intersect, list(
+  undirected_edges,
+  young_adult_edges,
+  mature_adult_edges,
+  senior_edges
+))
+
+# Count total shared edges
+n_shared <- length(shared_edges)
+
+# Calculate percentage of shared edges relative to each network
+edge_counts <- list(
+  "All Ages" = length(undirected_edges),
+  "Young Adult" = length(young_adult_edges),
+  "Mature Adult" = length(mature_adult_edges),
+  "Senior" = length(senior_edges)
+)
+
+percentages <- sapply(edge_counts, function(x) round(n_shared/x * 100, 1))
+
+# Create summary data frame
+summary_df <- data.frame(
+  Network = names(edge_counts),
+  Total_Edges = unlist(edge_counts),
+  Shared_Edges = n_shared,
+  Percent_Shared = percentages
+)
+
+# Print results
+cat("Number of edges shared across all networks:", n_shared, "\n\n")
+cat("Network-specific statistics:\n")
+print(summary_df)
+
+cat("\nShared edges:\n")
+print(shared_edges)
+
+```
+
+```{r}
+# Function to extract edge pairs from the name column
+extract_edges <- function(df) {
+  df$name %>%
+    str_extract_all("\\d+") %>%
+    lapply(function(x) {
+      if(length(x) >= 2) {
+        # Sort the numbers to standardize edge representation
+        sorted_nums <- sort(as.numeric(x[1:2]))
+        paste(sorted_nums[1], sorted_nums[2], sep="-")
+      }
+    }) %>%
+    unlist() %>%
+    unique()
+}
+
+
+
+# Find unique edges for each age group
+young_adult_unique <- setdiff(young_adult_edges, undirected_edges)
+mature_adult_unique <- setdiff(mature_adult_edges, undirected_edges)
+senior_unique <- setdiff(senior_edges, undirected_edges)
+
+# Combine all unique edges
+all_unique_edges <- unique(c(young_adult_unique, mature_adult_unique, senior_unique))
+
+# Create summary statistics
+summary_stats <- data.frame(
+  Age_Group = c("Young Adult", "Mature Adult", "Senior"),
+  Total_Edges = c(length(young_adult_edges), 
+                 length(mature_adult_edges), 
+                 length(senior_edges)),
+  Unique_Edges = c(length(young_adult_unique), 
+                  length(mature_adult_unique), 
+                  length(senior_unique)),
+  Percent_Unique = c(round(length(young_adult_unique)/length(young_adult_edges)*100, 1),
+                    round(length(mature_adult_unique)/length(mature_adult_edges)*100, 1),
+                    round(length(senior_unique)/length(senior_edges)*100, 1))
+)
+
+# Print summary statistics
+cat("Summary Statistics:\n")
+print(summary_stats)
+cat("\nTotal number of edges unique to age groups:", length(all_unique_edges), "\n\n")
+
+# Print detailed lists of unique edges
+cat("\nUnique edges in Young Adult network:\n")
+print(young_adult_unique)
+
+cat("\nUnique edges in Mature Adult network:\n")
+print(mature_adult_unique)
+
+cat("\nUnique edges in Senior network:\n")
+print(senior_unique)
+
+# Find edges that appear in multiple age groups but not in all ages
+young_mature_shared <- intersect(young_adult_unique, mature_adult_unique)
+young_senior_shared <- intersect(young_adult_unique, senior_unique)
+mature_senior_shared <- intersect(mature_adult_unique, senior_unique)
+all_age_shared <- Reduce(intersect, list(young_adult_unique, mature_adult_unique, senior_unique))
+
+# Print shared unique edges
+cat("\nEdges shared between age groups (but not in all ages network):\n")
+cat("\nShared between Young Adult and Mature Adult:", length(young_mature_shared), "edges\n")
+if(length(young_mature_shared) > 0) print(young_mature_shared)
+
+cat("\nShared between Young Adult and Senior:", length(young_senior_shared), "edges\n")
+if(length(young_senior_shared) > 0) print(young_senior_shared)
+
+cat("\nShared between Mature Adult and Senior:", length(mature_senior_shared), "edges\n")
+if(length(mature_senior_shared) > 0) print(mature_senior_shared)
+
+cat("\nShared among all age groups (but not in all ages network):", length(all_age_shared), "edges\n")
+if(length(all_age_shared) > 0) print(all_age_shared)
+
+```
+
+```{r}
+# Combine all stratified network edges
+all_stratified_edges <- unique(c(young_adult_edges, mature_adult_edges, senior_edges))
+
+# Find edges unique to the all-ages network
+unique_all_ages_edges <- setdiff(undirected_edges, all_stratified_edges)
+
+# Calculate summary statistics
+n_unique <- length(unique_all_ages_edges)
+percent_unique <- round((n_unique / length(undirected_edges)) * 100, 1)
+
+# Print results
+cat("Summary Statistics:\n")
+cat("Total edges in all-ages network:", length(undirected_edges), "\n")
+cat("Number of edges unique to all-ages network:", n_unique, "\n")
+cat("Percentage of all-ages edges that are unique:", percent_unique, "%\n\n")
+
+cat("Edges unique to all-ages network:\n")
+print(unique_all_ages_edges)
+```
+
+
+
+```{r}
+#power law analysis for total
+
+# Read and filter data
+undirected_node <- read.csv("./network attributes/undirected_node_attributes.csv", header = TRUE)
+node <- undirected_node[
+  undirected_node$IsSingleNode == "false" & 
+  !is.na(as.numeric(undirected_node$shared.name)), 
+]
+
+# Fit distributions
+degrees <- node$Degree
+
+# Power law fit
+m_power <- displ$new(degrees)
+m_power$setPars(estimate_pars(m_power))
+
+# Exponential fit
+m_exp <- disexp$new(degrees)
+m_exp$setPars(estimate_pars(m_exp))
+exp_fit <- fitdistr(degrees, 'exponential')
+
+# Compare distributions
+comparison <- compare_distributions(m_power, m_exp)
+exp_vs_power <- compare_distributions(m_exp, m_power)
+
+# Create degree frequency table
+freq_table <- as.data.frame(table(degrees))
+freq_table$degrees <- as.numeric(as.character(freq_table$degrees))
+freq_table$Frequency <- freq_table$Freq/sum(freq_table$Freq)
+
+# Generate fitted distribution curves
+x <- seq(1, max(degrees), length.out=1000)
+
+# Exponential curve
+exp_curve <- data.frame(
+  X = x,
+  estimate = dexp(x, rate = exp_fit$estimate),
+  category = "Exponential"
+)
+
+# Power law curve
+alpha <- m_power$pars
+xmin <- m_power$xmin
+power_curve <- data.frame(
+  X = x,
+  estimate = (x^(-alpha)) / sum((xmin:max(degrees))^(-alpha)),
+  category = "Power Law"
+)
+
+# Combine curves
+curves <- rbind(exp_curve, power_curve)
+
+# Create plot with adjusted scales
+final_plot <- ggplot() +
+  geom_point(data = freq_table, 
+             aes(x = degrees, y = Frequency), 
+             size = 3) +
+  geom_line(data = curves, 
+            aes(x = X, y = estimate, colour = category),
+            size = 1.5) +
+  scale_color_manual(values = c("#1B365D", "#00ABC8")) +
+  scale_x_continuous(breaks = seq(0, max(degrees), by = 1)) +  # Show all degree values
+  scale_y_log10(
+    breaks = c(0.001, 0.01, 0.1, 1),
+    labels = c("0.001", "0.01", "0.1", "1")
+  ) +
+  labs(x = "Degree",
+       y = "log(Density)",
+       color = "Model") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "right",
+    axis.text.x = element_text(hjust = 1),  # Rotate x-axis labels for better readability
+    axis.title = element_text(size = 24, face = "bold"),
+    axis.text = element_text(size = 18),
+    legend.title = element_text(size = 18),  # Adjust title size
+    legend.text = element_text(size = 16),
+    panel.grid.minor = element_blank()  # Remove minor grid lines
+  )
+
+
+final_plot
+
+# Save plot
+ggsave(filename = "degree_distribution.png", 
+       plot = final_plot, 
+       path = "./results images", 
+       width = 8, 
+       height = 5, 
+       dpi = 600)
+
+# Print results
+cat("\nDistribution Comparison Results:\n")
+cat("Power Law vs Exponential p-value:", comparison$p_two_sided, "\n")
+cat("Exponential vs Power Law p-value:", exp_vs_power$p_one_sided, "\n")
+cat("\nFit Parameters:\n")
+cat("Exponential rate:", exp_fit$estimate, "\n")
+cat("Power law alpha:", m_power$pars, "\n")
+```
+
 ```
 

@@ -8,27 +8,29 @@ output: html_document
 
 ```{r load packages}
 library(tidyverse)
-library(furrr)
 library(caret)
 library(writexl)
+library(dplyr)
+library(furrr)
 ```
 
 ```{r setup}
 # import data 
-data<-read.csv("cleaned_dog_data.csv")
-disease_frequencies<-read.csv("disease_frequencies.csv")
+data<-read.csv("./clean data/cleaned_strata_senior.csv")
+disease_frequencies<-read.csv("./frequency tables/disease_frequencies_senior.csv")
 
-# Set up parallel processing
-plan(multisession)
+# Sort data by a unique identifier
+data <- data %>% arrange(dog_id)  # Assuming dog_id is a unique identifier
 
 # Separate predictors
 predictors <- data %>%
-  select(dd_age_years, dd_weight_lbs, dd_breed_pure_or_mixed, 
+  dplyr::select(dd_age_years, dd_weight_lbs, dd_breed_pure_or_mixed,
          recode.sex_2, recode.sex_3, recode.sex_4)
 
+test<-data %>% dplyr::select(dd_age_years)
 # Separate response variables
 responses <- data %>%
-  select(starts_with("condition_"), starts_with("hs_cancer_types"))
+  dplyr::select(starts_with("condition_"), starts_with("hs_cancer_types"))
 ```
 
 ```{r LRM for each disease}
@@ -45,7 +47,7 @@ fit_logistic <- function(response, predictors) {
 }
 
 # Fit models for all response variables and get coefficients and p-values
-model_results <- future_map(responses, ~fit_logistic(.x, predictors), .options = furrr_options(seed = TRUE))
+model_results <- map(responses, ~fit_logistic(.x, predictors))
 
 # Combine the results into a single dataframe
 coef_pvalue_df <- do.call(rbind, lapply(names(model_results), function(disease) {
@@ -63,21 +65,24 @@ coef_pvalue_wide <- coef_pvalue_df %>%
     names_glue = "{Term}_{.value}"
   )
 
+
 # Reorder columns
-col_order <- c("Disease", 
+col_order <- c("Disease",
                paste0("(Intercept)_", c("Coefficient", "P_value")),
                paste0(colnames(predictors), "_Coefficient"),
                paste0(colnames(predictors), "_P_value"))
 coef_pvalue_wide <- coef_pvalue_wide[, col_order]
 
 # Save the dataframe to a CSV file
-write.csv(coef_pvalue_wide, "disease_coefficients_and_pvalues.csv", row.names = FALSE)
+#write.csv(coef_pvalue_wide, "./undirected network/disease_coefficients_and_pvalues_all.csv", row.names = FALSE)
 
 # For further analysis, extract just the coefficients
 coef_df <- coef_pvalue_wide %>%
-  select(Disease, ends_with("_Coefficient")) %>%
+  dplyr::select(Disease, ends_with("_Coefficient")) %>%
   rename_with(~str_remove(., "_Coefficient"), ends_with("_Coefficient"))
-write.csv(coef_df, "disease_coefficients_only.csv", row.names = FALSE) # Save dataframe to CSV
+
+# Save disease coefficients to CSV file
+#write.csv(coef_df, "./undirected network/disease_coefficients_only_all.csv", row.names = FALSE) # Save dataframe to CSV
 ```
 
 ```{r calculate individual risk}
@@ -89,11 +94,11 @@ calculate_probability <- function(predictors, coefficients) {
   return(prob)
 }
 
-# Calculate probabilities for all diseases in parallel
-risk_scores <- future_map(1:nrow(coef_df), function(i) {
+# Calculate probabilities for all diseases 
+risk_scores <- map(1:nrow(coef_df), function(i) {
   disease_coeffs <- as.numeric(coef_df[i, -1])  # Exclude the "Disease" column
   calculate_probability(predictors, disease_coeffs)
-}, .options = furrr_options(seed = TRUE))
+})
 
 # Combine the results into a dataframe
 risk_scores_df <- as.data.frame(do.call(cbind, risk_scores))
@@ -101,37 +106,62 @@ colnames(risk_scores_df) <- coef_df$Disease
 ```
 
 ```{r calculate variance}
-# Function to create balanced strata and fit models for a single disease
-create_strata_and_fit_models <- function(response, predictors, k = 6) {
-  # Create balanced folds
-  folds <- createDataPartition(response, times = k, p = 1/k, list = TRUE)
+# Function to create stratified folds and fit models for a single disease
+create_stratified_folds_and_fit_models <- function(response, predictors, k = 6) {
+  # Combine response and predictors
+  data <- cbind(response, predictors)
+  
+  # Separate positive and negative cases
+  positive_cases <- data[response == 1, ]
+  negative_cases <- data[response == 0, ]
+  
+  # Function to create balanced folds
+  create_balanced_folds <- function(cases, k) {
+    n <- nrow(cases)
+    fold_size <- floor(n / k)
+    folds <- rep(1:k, each = fold_size, length.out = n)
+    # Shuffle the folds to avoid any potential bias from the original order
+    set.seed(42)  # Use a fixed seed for shuffling to ensure reproducibility
+    folds <- sample(folds)
+    split(seq_len(n), folds)
+  }
+  
+  # Create folds for positive and negative cases
+  positive_folds <- create_balanced_folds(positive_cases, k)
+  negative_folds <- create_balanced_folds(negative_cases, k)
+  
+  # Combine positive and negative folds
+  combined_folds <- map2(positive_folds, negative_folds, c)
   
   # Function to fit model on a single fold
   fit_fold_model <- function(fold) {
-    fold_predictors <- predictors[fold, ]
-    fold_response <- response[fold]
-    model <- glm(fold_response ~ ., data = fold_predictors, family = binomial(link = "logit"))
+    fold_data <- data[fold, ]
+    model <- glm(response ~ ., data = fold_data, family = binomial(link = "logit"))
     return(coef(model))
   }
   
   # Fit models for each fold
-  models <- future_map(folds, fit_fold_model, .options = furrr_options(seed = TRUE))
+  models <- map(combined_folds, fit_fold_model)
   
   return(models)
 }
 
-# Create strata and fit models for each disease
-stratified_models <- future_map2(
-  responses, 
+# Create stratified folds and fit models for each disease
+stratified_models <- map2(
+  responses,   
   rep(list(predictors), ncol(responses)),
-  create_strata_and_fit_models,
-  .options = furrr_options(seed = TRUE)
+  create_stratified_folds_and_fit_models
 )
 
-# Calculate probabilities for the entire dataset using each stratum's coefficients
-calculate_all_probabilities <- function(strata_coefs, full_predictors) {
-  future_map(strata_coefs, ~calculate_probability(full_predictors, .x), .options = furrr_options(seed = TRUE))
+# Calculate probabilities for the entire dataset using each fold's coefficients
+calculate_all_probabilities <- function(fold_coefs, full_predictors) {
+  map(fold_coefs, ~calculate_probability(full_predictors, .x))
 }
+
+all_probabilities <- map(
+  stratified_models,
+  ~calculate_all_probabilities(.x, predictors)
+)
 
 all_probabilities <- future_map(
   stratified_models,
@@ -140,7 +170,7 @@ all_probabilities <- future_map(
 )
 
 # Calculate mean probabilities
-mean_probabilities <- future_map(all_probabilities, ~Reduce(`+`, .x) / length(.x), .options = furrr_options(seed = TRUE))
+mean_probabilities <- map(all_probabilities, ~Reduce(`+`, .x) / length(.x))
 
 # Calculate unbiased variance
 calculate_variance <- function(probs, mean_prob) {
@@ -148,14 +178,14 @@ calculate_variance <- function(probs, mean_prob) {
   return(variance)
 }
 
-unbiased_variance <- future_map2(all_probabilities, mean_probabilities, calculate_variance, .options = furrr_options(seed = TRUE))
+unbiased_variance <- map2(all_probabilities, mean_probabilities, calculate_variance)
 
 # Combine results into a single dataframe
 variance_df <- as.data.frame(do.call(cbind, unbiased_variance))
 colnames(variance_df) <- colnames(responses)
 
 # Save the variance dataframe
-write.csv(variance_df, "probability_variances.csv", row.names = FALSE)
+#write.csv(variance_df, "./undirected network/personalized_probability_with_variance_all.csv", row.names = FALSE)
 ```
 
 ```{r identify comorbid pairs}
@@ -210,13 +240,13 @@ network_df <- do.call(rbind, network_attributes) %>%
 # Apply Benjamini-Hochberg correction
 network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "BH")
 
-# Filter for significant pairs at 0.01 level
+# Filter for significant pairs 
 significant_pairs <- network_df %>% 
   filter(AdjustedPValue < 0.01) %>%
   arrange(AdjustedPValue)
 
 # Save network attributes
-write.csv(significant_pairs, "significant_pairs.csv",row.names = F)
+write.csv(significant_pairs, "./CSV network edges/significant_pairs_senior.csv",row.names = F)
 ```
 
 ```{r format dataframe for Cytoscape}
@@ -245,11 +275,39 @@ formatted_significant_pairs <- significant_pairs %>%
     Disease1 = sapply(Disease1, clean_disease_name),
     Disease2 = sapply(Disease2, clean_disease_name)
   ) %>%
-  select(Disease1, Disease2)
+  dplyr::select(Disease1, Disease2)
 
 # Save formatted network attributes
-write.csv(formatted_significant_pairs,"formatted_pairs.csv", row.names = F)
-write_xlsx(formatted_significant_pairs, "formatted_pairs.xlsx")
+write_xlsx(formatted_significant_pairs, "./network edges/formatted_pairs_senior.xlsx")
 ```
 
+
+```{r}
+# Create a lookup table for disease names
+disease_lookup <- disease_frequencies %>%
+  dplyr::select(Code = Numerical.Codes, Disease.Name) %>%
+  mutate(Code = as.character(Code))  # Convert Code to character
+
+# Convert the Disease1 and Disease2 columns from list to character
+formatted_significant_pairs <- formatted_significant_pairs %>%
+  mutate(
+    Disease1 = as.character(Disease1),
+    Disease2 = as.character(Disease2)
+  )
+
+# Add disease names to the Cytoscape edges
+lookup_table <- formatted_significant_pairs %>%
+  left_join(disease_lookup, by = c("Disease1" = "Code")) %>%
+  rename(Disease1_name = Disease.Name) %>%
+  left_join(disease_lookup, by = c("Disease2" = "Code")) %>%
+  rename(Disease2_name = Disease.Name)
+
+# Reorder columns
+lookup_table <- lookup_table %>%
+  dplyr::select(Disease1, Disease1_name, Disease2, Disease2_name)
+
+lookup_table <- cbind(lookup_table, pval = significant_pairs$AdjustedPValue)
+
+write.csv(lookup_table,"./lookup tables/lookup_senior.csv", row.names = F)
+```
 

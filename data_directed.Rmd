@@ -1,0 +1,261 @@
+---
+title: "DAP_data_directional"
+author: "Antoinette Fang"
+date: "2023-02-26"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(readr)
+library(purrr)
+library(haven)
+library(readxl)
+library(writexl)
+```
+
+```{r}
+# Read in data
+load.Rdata(filename="./DAP_2021_HLES_health_conditions_v1.0.RData", objname = "health_condition")
+load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dog_owner")
+cleaned_data<-read.csv("./clean data/cleaned_all.csv")
+personalized_probability<-read.csv("./undirected network/personalized_probability_with_variance_all.csv")
+personalized_probability<-cbind(dog_id = cleaned_data$dog_id,personalized_probability)
+undirected_comorbid_pairs<-read_xlsx("./network edges/formatted_pairs_all.xlsx")
+disease_frequencies <- read_csv("./frequency tables/disease_frequencies_all.csv")
+```
+
+```{r}
+# Function to safely convert values to numeric, handling labelled data
+safe_as_numeric <- function(x) {
+  if(inherits(x, "haven_labelled")) {
+    # If the data is labelled, convert to numeric
+    return(as.numeric(x))
+  } else {
+    # If not labelled, ensure it's numeric
+    return(as.numeric(x))
+  }
+}
+
+# Function to safely convert character dates to Date objects
+safe_date_convert <- function(x) {
+  if (inherits(x, "haven_labelled")) {
+    x <- haven::zap_labels(x)
+  }
+  as_date(parse_date_time(x, orders = c("ymd", "mdy", "dmy")))
+}
+
+# Get dog ages from test_clean_data
+dog_ages <- cleaned_data %>%
+  dplyr::select(dog_id, dd_age_years) %>%
+  mutate(dd_age_years = safe_as_numeric(dd_age_years))
+
+# Get survey completion dates from dog_owner_test
+survey_dates <- dog_owner %>%
+  dplyr::select(dog_id, st_hles_completion_date) %>%
+  mutate(st_hles_completion_date = safe_date_convert(st_hles_completion_date))
+
+# Calculate medical record length and latest diagnosis date
+medical_record_data <- health_condition %>%
+  mutate(across(c(hs_diagnosis_year, hs_diagnosis_month), safe_as_numeric)) %>%
+  mutate(
+    hs_diagnosis_year = if_else(hs_diagnosis_year < 1900 | hs_diagnosis_year > 2023, NA_real_, hs_diagnosis_year),
+    hs_diagnosis_month = if_else(hs_diagnosis_month < 1 | hs_diagnosis_month > 12, NA_real_, hs_diagnosis_month)
+  ) %>%
+  mutate(date = make_date(hs_diagnosis_year, hs_diagnosis_month, 1)) %>%
+  group_by(dog_id) %>%
+  summarise(
+    earliest_date = min(date, na.rm = TRUE),
+    latest_date = max(date, na.rm = TRUE),
+    record_length_months = interval(earliest_date, latest_date) %/% months(1),
+    valid_dates = sum(!is.na(date)),
+    .groups = "drop"
+  ) %>%
+  filter(!is.infinite(earliest_date), !is.infinite(latest_date), valid_dates > 0)
+
+# Join all data and calculate age at latest diagnosis
+final_data <- medical_record_data %>%
+  inner_join(dog_ages, by = "dog_id") %>%
+  inner_join(survey_dates, by = "dog_id") %>%
+  mutate(
+    years_since_latest_diagnosis = interval(latest_date, st_hles_completion_date) / years(1),
+    age_at_latest_diagnosis = dd_age_years - years_since_latest_diagnosis
+  )
+
+# Data cleaning and preparation
+check_data <- final_data %>%
+  mutate(
+    record_length_years = record_length_months / 12,
+    age_at_latest_diagnosis = as.numeric(age_at_latest_diagnosis) # Ensure it's numeric
+  ) %>%
+  filter(
+    record_length_years <= dd_age_years, # Record length should not exceed current age
+    age_at_latest_diagnosis >= 0, # Age at last diagnosis should be non-negative
+    age_at_latest_diagnosis <= dd_age_years, # Age at last diagnosis should not exceed current age
+    record_length_years >= 0, # Record length should be non-negative
+    record_length_years <= 25, # Assuming no dog has a medical record longer than 25 years
+    valid_dates > 1, # Remove dogs with only one diagnosis date
+    age_at_latest_diagnosis >= record_length_years # Ensure age at last diagnosis is not less than record length
+  ) %>%
+  mutate(
+    age_cat = cut(age_at_latest_diagnosis, 
+                  breaks = c(0, 3, 6, 9, 12, 15, 18, 21, Inf),
+                  labels = c("0-3", "3-6", "6-9", "9-12", "12-15", "15-18", "18-21", "\u2265 21"),
+                  right = FALSE)
+  )
+
+# Save file
+write.csv(check_data, "./directed network/diagnosis_date_data.csv", row.names = FALSE)
+```
+
+```{r}
+# Boxplot of medical record length vs Age at Last Diagnosis
+p <- ggplot(data = check_data, aes(x = age_cat, y = record_length_years, fill = age_cat)) +
+  geom_boxplot() +
+  labs(x = "Age at Last Diagnosis (yrs)",
+       y = "Length of Medical Record (yrs)",
+       fill = "Age Category") +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 18),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 16),
+        axis.text.y = element_text(size = 16),
+        legend.position = "right",
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 14)) +
+  scale_fill_grey(start = 0.8, end = 0.2)
+
+p
+
+ggsave("./results images/record_length_vs_age_boxplot.png", p, 
+       width = 9, height = 6, dpi = 600)
+```
+
+```{r}
+# Function to analyze temporal relationships and calculate probabilities for a disease pair
+analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condition, personalized_probability) {
+  
+  # Convert disease1 and disease2 to character explicitly
+  disease1 <- as.numeric(disease1)
+  disease2 <- as.numeric(disease2)
+  
+  # Identify dogs with both diseases
+  dogs_with_both <- cleaned_data %>%
+    filter(!!sym(paste0("condition_", disease1)) == 1 & 
+           !!sym(paste0("condition_", disease2)) == 1) %>%
+    pull(dog_id)
+  
+  # Get relevant health condition data
+  relevant_conditions <- health_condition %>%
+    filter(dog_id %in% dogs_with_both & 
+           hs_condition %in% c(disease1, disease2)) %>%
+    group_by(dog_id) %>%
+    filter(n() == 2) %>%  # Ensure each dog has exactly two rows (one for each disease)
+    ungroup()
+  
+  # Calculate temporal relationships and probabilities
+  temporal_probs <- relevant_conditions %>%
+    group_by(dog_id) %>%
+    arrange(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
+    summarize(
+      first_disease = first(hs_condition),
+      months_between = (last(hs_diagnosis_year) - first(hs_diagnosis_year)) * 12 +
+                       (last(hs_diagnosis_month) - first(hs_diagnosis_month)),
+      .groups = "drop"
+    ) %>%
+    left_join(personalized_probability, by = "dog_id") %>%
+    mutate(
+      prob_disease1 = !!sym(paste0("condition_", disease1)),
+      prob_disease2 = !!sym(paste0("condition_", disease2)),
+      prob_disease1_given_either = prob_disease1 / (prob_disease1 + prob_disease2),
+      prob_disease2_given_either = prob_disease2 / (prob_disease1 + prob_disease2),
+      prob_within_time_window = if_else(months_between <= 12, 1, 
+                                        (12 / months_between) * (2 - 12 / months_between)),
+      prob_disease1_before_disease2 = prob_disease1_given_either * prob_within_time_window,
+      prob_disease2_before_disease1 = prob_disease2_given_either * prob_within_time_window
+    )
+  
+  # Calculate expected counts and variances
+  results <- temporal_probs %>%
+    summarize(
+      expected_disease1_before_disease2 = sum(prob_disease1_before_disease2),
+      expected_disease2_before_disease1 = sum(prob_disease2_before_disease1),
+      variance_disease1_before_disease2 = sum(prob_disease1_before_disease2 * (1 - prob_disease1_before_disease2)),
+      variance_disease2_before_disease1 = sum(prob_disease2_before_disease1 * (1 - prob_disease2_before_disease1)),
+      count_disease1_first = sum(first_disease == disease1 & months_between <= 12),
+      count_disease2_first = sum(first_disease == disease2 & months_between <= 12)
+    )
+  
+  return(c(list(disease1 = disease1, disease2 = disease2), results))
+}
+
+# Analyze all disease pairs
+direct_expected_counts <- map_dfr(1:nrow(undirected_comorbid_pairs), ~{
+  disease_pair <- undirected_comorbid_pairs[.x, ]
+  analyze_disease_pair(disease_pair$Disease1, disease_pair$Disease2, 
+                       cleaned_data, health_condition, personalized_probability)
+})
+
+write.csv(direct_expected_counts,"./directed network/direct_expected_and_actual_counts.csv")
+
+```
+
+```{r}
+# Calculate p-values and determine significance
+results <- direct_expected_counts %>%
+  mutate(
+    p_value_1to2 = pnorm(count_disease1_first, 
+                         mean = expected_disease1_before_disease2, 
+                         sd = sqrt(variance_disease1_before_disease2), 
+                         lower.tail = FALSE),
+    p_value_2to1 = pnorm(count_disease2_first, 
+                         mean = expected_disease2_before_disease1, 
+                         sd = sqrt(variance_disease2_before_disease1), 
+                         lower.tail = FALSE),
+    significant_1to2 = p_value_1to2 < 0.05,
+    significant_2to1 = p_value_2to1 < 0.05
+  )
+
+# Create output for Cytoscape with p-values
+direct_significant_pairs <- results %>%
+  # Create rows for significant 1->2 relationships
+  {bind_rows(
+    # When disease1 significantly precedes disease2
+    filter(., significant_1to2) %>%
+    dplyr::select(source = disease1, 
+           target = disease2, 
+           p_value = p_value_1to2),
+    
+    # When disease2 significantly precedes disease1
+    filter(., significant_2to1) %>%
+    dplyr::select(source = disease2, 
+           target = disease1, 
+           p_value = p_value_2to1)
+  )}
+
+# Save formatted network attributes
+write_xlsx(direct_significant_pairs, "./network edges/direct_significant_pairs.xlsx")
+
+```
+
+```{r}
+# Create a lookup table for disease names
+disease_lookup <- disease_frequencies %>%
+  dplyr::select(Code = Numerical.Codes, Disease.Name) %>%
+  mutate(Code = as.integer(Code))  # Convert Code to integer
+
+# Add disease names to the Cytoscape edges
+lookup_table <- direct_significant_pairs %>%
+  left_join(disease_lookup, by = c("source" = "Code")) %>%
+  rename(source_name = Disease.Name) %>%
+  left_join(disease_lookup, by = c("target" = "Code")) %>%
+  rename(target_name = Disease.Name)
+
+# Reorder columns
+lookup_table <- lookup_table %>%
+  dplyr::select(source, source_name, target, target_name, p_value)
+
+write.csv(lookup_table,"./lookup tables/lookup_direct.csv", row.names = F)
+```
+

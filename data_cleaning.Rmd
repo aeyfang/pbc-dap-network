@@ -27,7 +27,7 @@ disease_code<-read.csv(file = "./diseaseCodes.csv")
 ```{r process and merge data frames}
 # Process dog_owner dataframe
 dog_owner <- dog_owner %>%
-  select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered) %>%
+  dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered) %>%
   mutate(
     dog_id = as.character(dog_id),
     dd_age_years = as.numeric(dd_age_years),
@@ -65,7 +65,7 @@ dog_owner <- dog_owner %>%
       TRUE ~ NA_character_
     )
   ) %>%
-  select(-dd_sex, -dd_spayed_or_neutered) %>% #remove original spay/neuter and sex columns
+  dplyr::select(-dd_sex, -dd_spayed_or_neutered) %>% #remove original spay/neuter and sex columns
   dummy_cols(select_columns = "recode.sex", remove_first_dummy = TRUE)
 
 # For cancer_condition dataframe
@@ -73,9 +73,9 @@ cancer_condition <- cancer_condition %>%
   filter(!str_detect(tolower(hs_cancer_types_other_description), 
                      "benign|not cancer|no cancer|non cancerous|non-cancerous|fatty tumor|non malignant|non-malignant|not malignant|not known|don't know|unknown|not|non|no") |
            is.na(hs_cancer_types_other_description)) %>%
-  select(dog_id, hs_initial_diagnosis_year, hs_initial_diagnosis_month, 
+  dplyr::select(dog_id, hs_initial_diagnosis_year, hs_initial_diagnosis_month, 
          starts_with("hs_cancer_types")) %>%
-  select(-hs_cancer_types_other_description) %>%
+  dplyr::select(-hs_cancer_types_other_description) %>%
   mutate(dog_id = as.character(dog_id))
 
 # Convert "true" to 1 and "false" to 0 for all hs_cancer_types columns
@@ -96,7 +96,7 @@ cancer_condition <- cancer_condition %>%
 # For health_condition dataframe
 health_condition_wide <- health_condition %>%
   filter(!is.na(hs_condition)) %>%
-  select(dog_id, hs_condition) %>%
+  dplyr::select(dog_id, hs_condition) %>%
   distinct() %>%
   mutate(present = 1,
          dog_id = as.character(dog_id)) %>% 
@@ -113,7 +113,7 @@ health_condition_wide <- health_condition %>%
     sorted_condition_cols <- sort(as.numeric(sub("^condition_", "", condition_cols)))
     sorted_condition_cols <- paste0("condition_", sorted_condition_cols)
     
-    select(., dog_id, all_of(sorted_condition_cols), everything())
+    dplyr::select(., dog_id, all_of(sorted_condition_cols), everything())
   }
 
 # Merge datasets
@@ -121,51 +121,11 @@ merged_data <- dog_owner %>%
   left_join(cancer_condition, by = "dog_id") %>%
   left_join(health_condition_wide, by = "dog_id")
 
-# Replace all NA values with 0
+# After replacing NA values with 0
 merged_data <- merged_data %>%
   mutate(across(everything(), ~replace_na(., 0)))
 
-# Identify columns with more than 60 dogs
-disease_columns <- merged_data %>%
-  select(starts_with("hs_cancer_types"), starts_with("condition_")) %>%
-  names()
-
-columns_to_keep <- disease_columns[colSums(merged_data[, disease_columns] == 1, na.rm = TRUE) >= 60]
-
-# Keep only the identified columns and the original dog_owner columns
-columns_to_keep <- c(names(dog_owner), "hs_initial_diagnosis_year", "hs_initial_diagnosis_month", columns_to_keep)
-merged_data <- merged_data %>% select(all_of(columns_to_keep))
-
-# Remove dogs with no diseases
-merged_data <- merged_data %>%
-  filter(if_any(c(starts_with("hs_cancer_types"), starts_with("condition_")), ~. == 1)) %>%
-  mutate(
-    total_diseases = rowSums(select(., starts_with("condition_") | starts_with("hs_cancer_")))
-  )
-
-write.csv(merged_data, "./cleaned_dog_data.csv", row.names = FALSE)
-```
-
-
-```{r amend codebook}
-# Calculate disease frequency
-raw_disease_counts <- merged_data %>%
-  select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
-  summarise(across(everything(), sum)) %>%
-  pivot_longer(everything(), names_to = "code", values_to = "frequency") %>%
-  mutate(code = str_remove(code, "condition_"))
-
-# Merge frequency data with disease_codes
-disease_frequencies <- disease_code %>%
-  inner_join(raw_disease_counts, by = c("Code.from.DAP.data" = "code")) %>%
-  select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency')
-
-# Write the disease frequencies to a new CSV file
-write.csv(disease_frequencies, "disease_frequencies.csv")
-```
-
-```{r stratify data by lifestage}
-# Split the merged dataset into four strata by lifestage
+# Stratify data by lifestage
 lifestage_strata <- merged_data %>%
   group_by(lifestage) %>%
   group_split()
@@ -173,6 +133,69 @@ lifestage_strata <- merged_data %>%
 # Name each stratum
 names(lifestage_strata) <- c("mature_adult", "puppy", "senior", "young_adult")
 
-# Write each stratum to a separate CSV file
-walk2(names(lifestage_strata), lifestage_strata, ~write_csv(.y, paste0("cleaned_strata_", .x, ".csv")))
-``
+# Function to apply criteria and clean data
+clean_data <- function(data) {
+  # Identify columns with more than 60 dogs
+  disease_columns <- data %>%
+    dplyr::select(starts_with("hs_cancer_types"), starts_with("condition_")) %>%
+    names()
+  columns_to_keep <- disease_columns[colSums(data[, disease_columns] == 1, na.rm = TRUE) >= 60]
+  
+  # Keep only the identified columns and the original dog_owner columns
+  columns_to_keep <- c(names(dog_owner), "hs_initial_diagnosis_year", "hs_initial_diagnosis_month", columns_to_keep)
+  
+  data <- data %>% 
+    dplyr::select(all_of(columns_to_keep)) %>%
+    # Remove dogs with no diseases
+    filter(if_any(c(starts_with("hs_cancer_types"), starts_with("condition_")), ~. == 1)) %>%
+    mutate(
+      total_diseases = rowSums(dplyr::select(., starts_with("condition_") | starts_with("hs_cancer_")))
+    )
+  
+  return(data)
+}
+
+# Apply criteria to original dataset
+merged_data_cleaned <- clean_data(merged_data)
+
+# Apply criteria to each stratum
+lifestage_strata_cleaned <- lapply(lifestage_strata, clean_data)
+
+# Write the cleaned original dataset to CSV
+write.csv(merged_data_cleaned, "./clean data/cleaned_all.csv", row.names = FALSE)
+
+# Write each cleaned stratum to a separate CSV file
+walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned, 
+      ~write.csv(.y, paste0("./clean data/cleaned_strata_", .x, ".csv"), row.names = FALSE))
+```
+
+
+```{r generate disease frequency table}
+# Function to generate disease frequency table
+generate_frequency_table <- function(data, suffix = "") {
+  raw_disease_counts <- data %>%
+    select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
+    summarise(across(everything(), sum)) %>%
+    pivot_longer(everything(), names_to = "code", values_to = "frequency") %>%
+    mutate(code = str_remove(code, "condition_"))
+  
+  disease_frequencies <- disease_code %>%
+    inner_join(raw_disease_counts, by = c("Code.from.DAP.data" = "code")) %>%
+    select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency') %>%
+    arrange(desc(frequency))
+  
+  write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
+  
+  return(disease_frequencies)
+}
+
+# Generate frequency table for overall dataset
+overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_all")
+
+# Generate frequency tables for each stratum
+strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
+                           ~generate_frequency_table(.x, paste0("_", .y)))
+```
+
+
+

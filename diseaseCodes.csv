@@ -1,0 +1,366 @@
+Code from DAP data,Numerical Codes,Disease Name,Disease Category
+101,101,Blindness ,Eye
+102,102, Cataracts ,Eye
+103,103, Glaucoma ,Eye
+104,104, Keratoconjunctivitis sicca (KCS) ,Eye
+105,105, Persistent pupillary membrane (PPM) ,Eye
+106,106, Missing one or both eyes ,Eye
+107,107, Third eyelid prolapse (cherry eye) ,Eye
+108,108, Conjunctivitis ,Eye
+109,109, Corneal ulcer ,Eye
+110,110, Distichia ,Eye
+111,111, Ectropion (eyelid rolled out) ,Eye
+112,112, Entropion (eyelid rolled in) ,Eye
+113,113, Imperforate lacrimal punctum ,Eye
+114,114, Iris cyst ,Eye
+115,115, Juvenile cataracts ,Eye
+116,116, Nuclear sclerosis ,Eye
+117,117, Pigmentary uveitis ,Eye
+118,118, Progressive retinal atrophy ,Eye
+119,119, Retinal detachment ,Eye
+120,120, Uveitis ,Eye
+198,198, Other eye condition ,Eye
+201,201, Deafness ,Ear/Nose/Throat
+202,202, Ear Infection ,Ear/Nose/Throat
+203,203, Ear Mites ,Ear/Nose/Throat
+204,204, Epistaxis (nose bleeds) ,Ear/Nose/Throat
+205,205, Hearing loss (incompletely deaf) ,Ear/Nose/Throat
+206,206, Hematoma ,Ear/Nose/Throat
+207,207, Pharyngitis ,Ear/Nose/Throat
+208,208, Rhinitis ,Ear/Nose/Throat
+209,209, Tonsillitis ,Ear/Nose/Throat
+298,298, Other ear condition ,Ear/Nose/Throat
+301,301, Cleft lip ,Mouth/Dental/Oral
+302,302, Cleft palate ,Mouth/Dental/Oral
+303,303, Missing teeth ,Mouth/Dental/Oral
+304,304, Dental calculus (yellow build-up on teeth) ,Mouth/Dental/Oral
+305,305, Extracted teeth ,Mouth/Dental/Oral
+306,306, Fractured teeth ,Mouth/Dental/Oral
+307,307," Gingivitis (red, puffy gums) ",Mouth/Dental/Oral
+308,308, Masticatory myositis ,Mouth/Dental/Oral
+309,309, Oronasal fistula ,Mouth/Dental/Oral
+310,310, Overbite ,Mouth/Dental/Oral
+311,311, Retained deciduous (baby) teeth ,Mouth/Dental/Oral
+312,312, Sialocele ,Mouth/Dental/Oral
+313,313, Underbite ,Mouth/Dental/Oral
+398,398, Other oral condition ,Mouth/Dental/Oral
+401,401, Dermoid cysts ,Skin
+402,402, Spina bifida ,Skin
+403,403, Umbilical hernia (Skin) ,Skin
+404,404, Alopecia (hair loss) ,Skin
+405,405, Atopic dermatitis (atopy) ,Skin
+406,406, Chronic or recurrent hot spots ,Skin
+407,407, Chronic or recurrent skin infections ,Skin
+408,408, Contact dermatitis ,Skin
+409,409, Discoid lupus erythematosus (DLE) (Skin) ,Skin
+410,410, Flea allergy dermatitis ,Skin
+411,411, Fleas ,Skin
+412,412, Food or medicine allergies that affect the skin ,Skin
+413,413, Ichthyosis ,Skin
+414,414, Lick granuloma ,Skin
+415,415, Non-specific dermatosis ,Skin
+416,416, Panepidermal pustular pemphigus (PPP) (Skin) ,Skin
+417,417, Paraneoplastic pemphigus (PNP) (Skin) ,Skin
+418,418, Pemphigus erythematosus (PE) (Skin) ,Skin
+419,419, Pemphigus foliaceus (PF) (Skin) ,Skin
+420,420, Pemphigus vulgaris (PV) (Skin) ,Skin
+421,421, Pododermatitis ,Skin
+422,422, Polymyositis (Skin) ,Skin
+423,423, Pruritis (itchy skin) ,Skin
+424,424, Pyoderma or bacterial dermatitis ,Skin
+425,425, Sarcoptic mange ,Skin
+426,426, Seasonal allergies ,Skin
+427,427, Sebaceous adenitis ,Skin
+428,428, Sebaceous cysts ,Skin
+429,429, Seborrhea or seborrheic dermatitis (greasy skin) ,Skin
+430,430, Systemic demodectic mange ,Skin
+431,431, Systemic lupus erythematosus (SLE) (Skin) ,Skin
+432,432, Ticks ,Skin
+498,498, Other skin condition ,Skin
+501,501, Aortic/Subaortic stenosis ,Cardiac
+502,502, Atrial septal defects ,Cardiac
+503,503, Mitral dysplasia ,Cardiac
+504,504, Murmur ,Cardiac
+505,505, Patent ductus arteriosus (PDA) ,Cardiac
+506,506, Persistent right aortic arch ,Cardiac
+507,507, Pulmonic stenosis ,Cardiac
+508,508, Tricuspid dysplasia ,Cardiac
+509,509, Ventricular septal defects ,Cardiac
+510,510, Arrhythmia ,Cardiac
+511,511, Cardiomyopathy ,Cardiac
+512,512, Congestive heart failure ,Cardiac
+513,513, Endocarditis ,Cardiac
+514,514, Hypertension (high blood pressure) ,Cardiac
+515,515, Pericardial effusion ,Cardiac
+516,516, Pulmonary hypertension ,Cardiac
+518,518, Subaortic stenosis ,Cardiac
+519,519, Valve disease ,Cardiac
+598,598, Other Cardiac ,Cardiac
+601,601, Stenotic/narrow nares ,Respiratory
+602,602, Tracheal stenosis (narrowing) ,Respiratory
+603,603, Acquired or acute respiratory distress syndrome (ARDS) ,Respiratory
+604,604, Chronic or recurrent bronchitis ,Respiratory
+605,605, Chronic or recurrent cough ,Respiratory
+606,606, Chronic or recurrent rhinitis ,Respiratory
+607,607, Elongated soft palate ,Respiratory
+608,608, Laryngeal paralysis (Respiratory) ,Respiratory
+609,609, Lung lobe torsion ,Respiratory
+610,610, Pneumonia ,Respiratory
+611,611, Pulmonary bullae ,Respiratory
+612,612, Tracheal collapse ,Respiratory
+698,698, Other respiratory condition ,Respiratory
+701,701, Atresia ani ,Gastrointestinal
+702,702, Esophageal achalasia ,Gastrointestinal
+703,703, Megaesophagus ,Gastrointestinal
+704,704, Umbilical hernia (Gastrointestinal) ,Gastrointestinal
+705,705, Anal sac impaction ,Gastrointestinal
+706,706, Bilious vomiting syndrome ,Gastrointestinal
+707,707, Bloat with torsion (GDV) ,Gastrointestinal
+708,708, Chronic or recurrent diarrhea ,Gastrointestinal
+709,709, Chronic or recurrent vomiting ,Gastrointestinal
+710,710, Constipation ,Gastrointestinal
+711,711, Fecal incontinence ,Gastrointestinal
+712,712, Food or medicine allergies ,Gastrointestinal
+713,713, Foreign body ingestion or blockage ,Gastrointestinal
+714,714, Hemorrhagic gastroenteritis (HGE) or stress colitis (acute) ,Gastrointestinal
+715,715, Idiopathic canine colitis (chronic) ,Gastrointestinal
+716,716, Irritable bowel syndrome (IBS) or inflammatory bowel disease (IBD) ,Gastrointestinal
+717,717, Lymphangiectasia ,Gastrointestinal
+718,718, Malabsorptive disorder ,Gastrointestinal
+719,719, Other allergies ,Gastrointestinal
+720,720, Protein-losing enteropathy (PLE) ,Gastrointestinal
+721,721, Pyloric stenosis ,Gastrointestinal
+798,798, Other gastrointestinal condition ,Gastrointestinal
+801,801, Portosystemic shunt ,Liver/Pancreas
+802,802, Biliary obstruction ,Liver/Pancreas
+803,803, Chronic inflammatory liver disease ,Liver/Pancreas
+804,804, Exocrine pancreatic insufficiency (EPI) ,Liver/Pancreas
+805,805, Gall bladder mucocele ,Liver/Pancreas
+806,806, Gall bladder rupture ,Liver/Pancreas
+807,807, Gall bladder surgery ,Liver/Pancreas
+808,808, Microvascular dysplasia (portal vein hypoplasia) ,Liver/Pancreas
+809,809, Pancreatitis ,Liver/Pancreas
+898,898, Other liver condition ,Liver/Pancreas
+901,901, Born with one kidney ,Kidney/Urinary
+902,902, Ectopic ureter ,Kidney/Urinary
+903,903, Patent urachus ,Kidney/Urinary
+904,904, Renal cysts ,Kidney/Urinary
+905,905, Renal dysplasia ,Kidney/Urinary
+906,906, Acute kidney failure ,Kidney/Urinary
+907,907, Bladder prolapse ,Kidney/Urinary
+908,908, Chronic kidney disease ,Kidney/Urinary
+909,909, Pyelonephritis (kidney infection) ,Kidney/Urinary
+910,910, Kidney stones ,Kidney/Urinary
+911,911, Proteinuria ,Kidney/Urinary
+912,912, Tubular disorder (such as Fanconi syndrome) ,Kidney/Urinary
+913,913, Urethral prolapse ,Kidney/Urinary
+914,914, Urinary crystals or stones in bladder or urethra ,Kidney/Urinary
+915,915, Urinary incontinence ,Kidney/Urinary
+916,916, Urinary tract infection (chronic or recurrent) ,Kidney/Urinary
+998,998, Other kidney condition ,Kidney/Urinary
+1001,1001, Cryptorchid ,Reproductive
+1002,1002, Hermaphroditism ,Reproductive
+1003,1003, Hypospadias ,Reproductive
+1004,1004, Phimosis ,Reproductive
+1005,1005, Benign prostatic hyperplasia ,Reproductive
+1006,1006, Dystocia ,Reproductive
+1007,1007, Irregular heat cycle ,Reproductive
+1008,1008, Mastitis ,Reproductive
+1009,1009, Papilloma (genital warts) ,Reproductive
+1010,1010, Paraphimosis ,Reproductive
+1011,1011, Prostatitis ,Reproductive
+1012,1012, Preputial infection ,Reproductive
+1013,1013, Pseudopregnancy ,Reproductive
+1014,1014, Pyometra ,Reproductive
+1015,1015, Recessed vulva ,Reproductive
+1016,1016, Testicular atrophy ,Reproductive
+1017,1017, Vaginitis ,Reproductive
+1098,1098, Other reproductive condition ,Reproductive
+1101,1101, Missing a limb or part of a limb ,Bone/Orthopedic
+1102,1102, Valgus deformity ,Bone/Orthopedic
+1103,1103, Varus deformity ,Bone/Orthopedic
+1104,1104, Carpal subluxation syndrome ,Bone/Orthopedic
+1105,1105, Cruciate ligament rupture ,Bone/Orthopedic
+1106,1106, Degenerative joint disease ,Bone/Orthopedic
+1107,1107, Dwarfism ,Bone/Orthopedic
+1108,1108, Elbow dysplasia ,Bone/Orthopedic
+1109,1109, Growth deformity ,Bone/Orthopedic
+1110,1110, Hip dysplasia ,Bone/Orthopedic
+1111,1111, Intervertebral disc disease (IVDD) (Orthopedic) ,Bone/Orthopedic
+1112,1112, Lameness (chronic or recurrent) ,Bone/Orthopedic
+1113,1113, Osteoarthritis ,Bone/Orthopedic
+1114,1114, Osteochondritis dissecans (OCD) ,Bone/Orthopedic
+1115,1115, Osteomyelitis ,Bone/Orthopedic
+1116,1116, Panosteitis ,Bone/Orthopedic
+1117,1117, Patellar luxation ,Bone/Orthopedic
+1118,1118, Rheumatoid arthritis ,Bone/Orthopedic
+1119,1119, Spondylosis ,Bone/Orthopedic
+1198,1198, Other orthopedic condition ,Bone/Orthopedic
+1201,1201, Cerebellar hypoplasia ,Brain/Neurologic
+1202,1202, Hydrocephalus ,Brain/Neurologic
+1203,1203, Cauda equina syndrome ,Brain/Neurologic
+1204,1204, Degenerative myelopathy ,Brain/Neurologic
+1205,1205, Dementia or senility ,Brain/Neurologic
+1206,1206, Diskospondylitis ,Brain/Neurologic
+1207,1207, Dysautonomia ,Brain/Neurologic
+1208,1208, Fibrocartilaginous embolism (FCE) ,Brain/Neurologic
+1209,1209, Horner's syndrome ,Brain/Neurologic
+1210,1210, Intervertebral disc disease (IVDD) (Neurologic) ,Brain/Neurologic
+1211,1211, Laryngeal paralysis (Neurologic) ,Brain/Neurologic
+1212,1212, Limb paralysis ,Brain/Neurologic
+1213,1213, Myasthenia gravis ,Brain/Neurologic
+1214,1214, Polyneuropathy ,Brain/Neurologic
+1215,1215, Seizures (including epilepsy) ,Brain/Neurologic
+1216,1216, Vestibular disease ,Brain/Neurologic
+1217,1217, Wobbler syndrome ,Brain/Neurologic
+1298,1298, Other neurologic condition ,Brain/Neurologic
+1301,1301, Congenital hypothyroidism ,Endocrine
+1302,1302, Juvenile hypoglycemia ,Endocrine
+1303,1303, Pituitary dwarfism ,Endocrine
+1304,1304, Addison's disease (hypoadrenocorticism; low adrenal function) ,Endocrine
+1305,1305, Cushing's disease (hyperadrenocorticism; excess adrenal function) ,Endocrine
+1306,1306, Diabetes insipidus (rare diabetes which causes water balance problems) ,Endocrine
+1307,1307, Diabetes mellitus (common diabetes which causes high blood sugar) ,Endocrine
+1308,1308, Hypercalcemia (excess calcium in the blood) ,Endocrine
+1309,1309, Hyperparathyroidism (excess parathyroid function causing high calcium) ,Endocrine
+1310,1310, Hypoparathyroidism (low parathyroid function causing low calcium) ,Endocrine
+1311,1311, Hyperthyroidism (excess thyroid function) ,Endocrine
+1312,1312, Hypothyroidism (low thyroid function) ,Endocrine
+1398,1398, Other endocrine condition ,Endocrine
+1401,1401, Congenital dyserythropoiesis ,Hematopoietic
+1402,1402, Macrothrombocytopenia ,Hematopoietic
+1403,1403, Microcytosis or macrocytosis ,Hematopoietic
+1404,1404, Pelger-Huet anomaly ,Hematopoietic
+1405,1405, Phosphofructokinase (PFK) deficiency ,Hematopoietic
+1406,1406, Pyruvate kinase (PK) deficiency ,Hematopoietic
+1407,1407, Anemia ,Hematopoietic
+1408,1408, Factor I deficiency ,Hematopoietic
+1409,1409, Hemophilia ,Hematopoietic
+1410,1410, Polycythemia ,Hematopoietic
+1411,1411, Selective IgM deficiency ,Hematopoietic
+1412,1412, Splenic hematoma ,Hematopoietic
+1413,1413, Splenic torsion ,Hematopoietic
+1414,1414, Thrombocytopenia (not immune-mediated) ,Hematopoietic
+1415,1415, Thromboembolism ,Hematopoietic
+1416,1416, Von Willebrand's disease ,Hematopoietic
+1498,1498, Other Hematopoietic ,Hematopoietic
+1598,1598, Other congenital disorder ,Other congenital disorder
+1601,1601, Anaplasmosis ,Infection/Parasites
+1602,1602, Aspergillosis ,Infection/Parasites
+1603,1603, Babesiosis ,Infection/Parasites
+1604,1604, Blastomycosis ,Infection/Parasites
+1605,1605, Bordetella and/or parainfluenza (kennel cough),Infection/Parasites
+1606,1606, Brucellosis ,Infection/Parasites
+1607,1607, Campylobacteriosis ,Infection/Parasites
+1608,1608, Chagas disease (trypanosomiasis) ,Infection/Parasites
+1609,1609, Coccidia ,Infection/Parasites
+1610,1610, Coccidioidiomycosis ,Infection/Parasites
+1611,1611, Cryptococcus ,Infection/Parasites
+1612,1612, Dermatophytosis (ringworm),Infection/Parasites
+1613,1613, Distemper ,Infection/Parasites
+1614,1614, Ehrlichiosis ,Infection/Parasites
+1615,1615, Fever of unknown origin ,Infection/Parasites
+1616,1616, Gastrointestinal parasites ,Infection/Parasites
+1617,1617, Giardia ,Infection/Parasites
+1618,1618, Granuloma ,Infection/Parasites
+1619,1619, Heartworm infection ,Infection/Parasites
+1620,1620, Histoplasmosis ,Infection/Parasites
+1621,1621, Hepatozoonosis ,Infection/Parasites
+1622,1622, Hookworms ,Infection/Parasites
+1623,1623, Influenza ,Infection/Parasites
+1624,1624, Isospora ,Infection/Parasites
+1625,1625, Leishmaniasis ,Infection/Parasites
+1626,1626, Leptospirosis ,Infection/Parasites
+1627,1627, Lyme disease ,Infection/Parasites
+1628,1628, MRSA/MRSP ,Infection/Parasites
+1629,1629, Mycobacterium ,Infection/Parasites
+1630,1630, Parvovirus ,Infection/Parasites
+1631,1631, Plague (Yersinia pestis) ,Infection/Parasites
+1632,1632, Pythium ,Infection/Parasites
+1633,1633, Rocky Mountain Spotted Fever (RMSF) ,Infection/Parasites
+1634,1634, Roundworms ,Infection/Parasites
+1635,1635, Salmonellosis ,Infection/Parasites
+1636,1636, Salmon poisoning ,Infection/Parasites
+1637,1637, Tapeworms ,Infection/Parasites
+1638,1638, Toxoplasma ,Infection/Parasites
+1639,1639, Tularemia ,Infection/Parasites
+1640,1640, Whipworms ,Infection/Parasites
+1698,1698, Other infectious disease ,Infection/Parasites
+1701,1701, Chocolate ,Toxin Consumption
+1702,1702, Ethylene glycol (antifreeze) ,Toxin Consumption
+1703,1703, Grapes or raisins ,Toxin Consumption
+1704,1704, Ingestion of human medications ,Toxin Consumption
+1705,1705, Ingestion of recreational drugs ,Toxin Consumption
+1706,1706, Mouse or rat bait/poison (Bromethalin) ,Toxin Consumption
+1707,1707, Mouse or rat bait/poison (Calciferol) ,Toxin Consumption
+1708,1708, Mouse or rat bait/poison (Warfarin) ,Toxin Consumption
+1709,1709, Mouse or rat bait/poison (Other/Unknown) ,Toxin Consumption
+1710,1710, Overdose of medications prescribed to the dog ,Toxin Consumption
+1798,1798, Other ToxinConsumption ,Toxin Consumption
+1801,1801, Dog bite ,Trauma
+1802,1802, Bite wound from another animal ,Trauma
+1803,1803, Fall from height ,Trauma
+1804,1804, Fractured bone (long bone in limb) ,Trauma
+1805,1805, Fractured bone (other bone in limb) ,Trauma
+1806,1806, Fractured bone (spine) ,Trauma
+1807,1807, Fractured bone (rib(s)) ,Trauma
+1808,1808, Fractured bone (flat bone of head or face) ,Trauma
+1809,1809, Head trauma due to any cause ,Trauma
+1810,1810, Hit by car or other vehicle ,Trauma
+1811,1811, Kicked by horse or other large animal ,Trauma
+1812,1812, Laceration ,Trauma
+1813,1813, Penetrating wound (such as a stick) ,Trauma
+1814,1814, Proptosis (eye out of socket) ,Trauma
+1815,1815, Snakebite ,Trauma
+1816,1816, Tail injury ,Trauma
+1817,1817, Torn or broken toenail ,Trauma
+1898,1898, Other trauma ,Trauma
+1901,1901, Autoimmune thyroiditis ,Immune-mediated
+1902,1902, Discoid lupus erythematosus (DLE) (Immune) ,Immune-mediated
+1903,1903, Idiopathic immune-mediated thrombocytopenia (IMT/ITP) ,Immune-mediated
+1904,1904, Immune-mediated hemolytic anemia (IMHA) or autoimmune hemolytic anemia (AIHA) ,Immune-mediated
+1905,1905, Immune-mediated polyarthritis (IMPA) ,Immune-mediated
+1906,1906, Panepidermal pustular pemphigus (PPP) (Immune) ,Immune-mediated
+1907,1907, Paraneoplastic pemphigus (PNP) (Immune) ,Immune-mediated
+1908,1908, Pemphigus erythematosus (PE) (Immune) ,Immune-mediated
+1909,1909, Pemphigus foliaceus (PF) (Immune) ,Immune-mediated
+1910,1910, Pemphigus vulgaris (PV) (Immune) ,Immune-mediated
+1911,1911, Polymyositis (Immune) ,Immune-mediated
+1912,1912, Systemic lupus erythematosus (SLE) (Immune) ,Immune-mediated
+1998,1998, Other Immune,Immune-mediated
+hs_cancer_types_adenocarcinoma,2001,Adenocarcinoma,Cancer
+hs_cancer_types_adenoma,2002,Adenoma,Cancer
+hs_cancer_types_basal_cell_tumor,2003,Basal cell tumor,Cancer
+hs_cancer_types_carcinoma,2004,Carcinnoma,Cancer
+hs_cancer_types_chondrosarcoma,2005,Chondrosarcoma,Cancer
+hs_cancer_types_cystadenoma,2006,Cystadenoma,Cancer
+hs_cancer_types_epidermoid_cyst,2007,Epidermoid cyst,Cancer
+hs_cancer_types_epulides,2008,Epulides,Cancer
+hs_cancer_types_fibrosarcoma,2009,Fibrosarcoma,Cancer
+hs_cancer_types_hemangioma,2010,Hemangioma,Cancer
+hs_cancer_types_hemangiosarcoma,2011,Hemangiosarcoma,Cancer
+hs_cancer_types_histiocytic_sarcoma,2012,Histiocytic sarcoma,Cancer
+hs_cancer_types_histiocytoma,2013,Histiocytoma,Cancer
+hs_cancer_types_insulinoma,2014,Insulinoma,Cancer
+hs_cancer_types_leiomyoma,2015,Leiomyoma,Cancer
+hs_cancer_types_leiomyosarcoma,2016,Leiomyomasarcoma,Cancer
+hs_cancer_types_leukemia,2017,Leukemia,Cancer
+hs_cancer_types_lipoma,2018,Lipoma,Cancer
+hs_cancer_types_lymphoma_lymphosarcoma,2019,Lymphoma lymphosarcoma,Cancer
+hs_cancer_types_mast_cell_tumor,2020,Mast cell tumor,Cancer
+hs_cancer_types_melanoma,2021,Melanoma,Cancer
+hs_cancer_types_meningioma,2022,Meningioma,Cancer
+hs_cancer_types_multiple_myeloma,2023,Multiple myeloma,Cancer
+hs_cancer_types_osteosarcoma,2024,Osteosarcoma,Cancer
+hs_cancer_types_other,2098,Other,Cancer
+hs_cancer_types_papilloma,2025,Papilloma,Cancer
+hs_cancer_types_peripheral_nerve_sheath_tumor,2026,Peripheral nerve sheath tumor,Cancer
+hs_cancer_types_plasmacytoma,2027,Plasmacytoma,Cancer
+hs_cancer_types_rhabdomyosarcoma,2028,Rhabdomyosarcoma,Cancer
+hs_cancer_types_sarcoma,2029,Sarcoma,Cancer
+hs_cancer_types_sebaceous_adenoma,2030,Sebaceous adenoma,Cancer
+hs_cancer_types_soft_tissue_sarcoma,2031,Soft tissue sarcoma,Cancer
+hs_cancer_types_squamous_cell_carcinoma,2032,Squamous cell carcinoma,Cancer
+hs_cancer_types_thymoma,2033,Thymoma,Cancer
+hs_cancer_types_transitional_cell_carcinoma,2034,Transitional cell carcinoma,Cancer
+hs_cancer_types_unknown,2099,Unknown,Cancer
