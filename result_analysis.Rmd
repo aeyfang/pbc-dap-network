@@ -127,7 +127,7 @@ ggplot(result_long_lower, aes(x = category, y = comparison, fill = shared_edges)
   coord_fixed()
 
 # Save the updated plot
-ggsave("./results images/shared_edges_heatmap.png", width = 6, height = 6, dpi = 600)
+ggsave("./results images/shared_edges_heatmap.tiff", width = 6, height = 6, dpi = 600, compression = 'lzw')
 ```
 
 
@@ -372,9 +372,9 @@ final_plot <- ggplot() +
 final_plot
 
 # Save plot
-ggsave(filename = "degree_distribution.png", 
+ggsave(filename = "Fig_2.tiff", 
        plot = final_plot, 
-       path = "./results images", 
+       path = "./figures", 
        width = 8, 
        height = 5, 
        dpi = 600)
@@ -388,5 +388,109 @@ cat("Exponential rate:", exp_fit$estimate, "\n")
 cat("Power law alpha:", m_power$pars, "\n")
 ```
 
+```{r}
+# Read data files
+pair_variances <- read.csv("./summary statistics/pair_variances.csv") 
+disease_freqs <- read.csv("./frequency tables/disease_frequencies_all.csv")
+
+# Calculate disease prevalence
+total_dogs <- 26523
+disease_freqs$prevalence <- disease_freqs$frequency / total_dogs * 100
+
+# Define rare diseases (less than 1% prevalence)
+rare_threshold <- 1
+rare_diseases <- disease_freqs$Numerical.Codes[disease_freqs$prevalence < rare_threshold]
+
+# Extract numerical codes from Disease1 and Disease2 columns
+pair_variances$code1 <- as.numeric(gsub("condition_", "", pair_variances$Disease1))
+pair_variances$code2 <- as.numeric(gsub("condition_", "", pair_variances$Disease2))
+
+# Create flags for rare disease pairs
+pair_variances$contains_rare <- pair_variances$code1 %in% rare_diseases | 
+                               pair_variances$code2 %in% rare_diseases
+pair_variances$all_rare <- pair_variances$code1 %in% rare_diseases & 
+                          pair_variances$code2 %in% rare_diseases
+
+# Create disease pair type classification
+pair_variances$pair_type <- "Both common"
+pair_variances$pair_type[pair_variances$contains_rare & !pair_variances$all_rare] <- "One rare"
+pair_variances$pair_type[pair_variances$all_rare] <- "Both rare"
+
+# Convert to ordered factor
+pair_variances$pair_type <- factor(pair_variances$pair_type, 
+                                 levels = c("Both common", "One rare", "Both rare"))
+
+# Create scatter plot
+variance_plot <- ggplot(data = pair_variances, 
+       aes(x = UnadjustedVariance, 
+           y = FinalVariance,
+           color = pair_type)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(linetype = "dashed", color = "gray", alpha = 0.5) +
+  scale_color_manual(values = c("blue", "orange", "red")) +
+  labs(title = "Comparison of Unadjusted vs Final Variances",
+       subtitle = paste("Rare disease threshold:", rare_threshold, "% prevalence"),
+       x = "Unadjusted Variance",
+       y = "Final Variance",
+       color = "Disease Pair Type") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# Calculate and print summary statistics
+print("Disease pair type counts:")
+print(table(pair_variances$pair_type))
+
+pair_stats <- pair_variances %>%
+  group_by(pair_type) %>%
+  summarise(
+    count = n(),
+    mean_adjustment = mean(FinalVariance - UnadjustedVariance),
+    median_adjustment = median(FinalVariance - UnadjustedVariance),
+    adjustment_ratio = mean(FinalVariance / UnadjustedVariance)
+  )
+print("\nPair statistics:")
+print(pair_stats)
+
+# Save the plot
+ggsave(filename = "variance_plot_enhanced.png", 
+       plot = variance_plot, 
+       path = "./results images", 
+       width = 12, 
+       height = 9, 
+       dpi = 600)
 ```
+```
+```{r}
+# Filter for significant pairs
+sig_pairs <- pair_variances[pair_variances$AdjustedPValue < 0.01, ]
+
+# Create column for rare disease pairs as before
+sig_pairs$contains_rare <- sig_pairs$code1 %in% rare_diseases | 
+                          sig_pairs$code2 %in% rare_diseases
+
+# Create the scatter plot for significant pairs
+ggplot(data = sig_pairs, 
+       aes(x = UnadjustedVariance, 
+           y = FinalVariance,
+           color = contains_rare)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(linetype = "dashed", color = "gray", alpha = 0.5) +
+  scale_color_manual(values = c("blue", "red"),
+                    labels = c("Common diseases", "Contains rare disease")) +
+  labs(title = "Variance Comparison for Significant Disease Pairs",
+       subtitle = paste("Adjusted p-value < 0.01, Rare disease threshold:", rare_threshold, "% prevalence"),
+       x = "Unadjusted Variance",
+       y = "Final Variance",
+       color = "Disease Pair Type") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# Print number of significant pairs
+cat("Number of significant disease pairs:", nrow(sig_pairs), "\n")
+cat("Number of significant pairs containing rare diseases:", sum(sig_pairs$contains_rare), "\n")
+cat("Number of significant pairs of common diseases:", sum(!sig_pairs$contains_rare), "\n")
+```
+
 

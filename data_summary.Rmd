@@ -11,10 +11,14 @@ library(dplyr)
 library(gt)
 library(gtsummary)
 library(webshot2)
+library(stats)
+library(tidyr)
+library(cowplot)
 ```
 
 ```{r import data}
 cleaned_dog_data<-read.csv(file = "./clean data/cleaned_all.csv")
+cleaned_dog_data_all<-read.csv(file="./clean data/merged_data_with_no_diseases.csv")
 disease_frequencies<-read.csv(file = "./frequency tables/disease_frequencies_all.csv")
 ```
 
@@ -71,21 +75,31 @@ table1 <- cleaned_dog_data %>%
       dd_age_years ~ "Age (years)",
       dd_weight_lbs ~ "Weight (lbs)"
     ),
-    digits = all_continuous() ~ 1
+    digits = list(
+      all_categorical() ~ c(0, 0),
+      all_continuous() ~ 1
+    )
   ) %>%
-  modify_header(label = "**Characteristic**") 
+  modify_header(label = "**Characteristic**") %>%
+  modify_table_body(
+    ~.x %>%
+      mutate(stat_0 = if_else(
+        variable == "sex" & label == "Female, spayed",
+        gsub("47%", "46%", stat_0),
+        stat_0
+      ))
+  )
 
-# Display the table in R
+# Display the table
 print(table1)
 
 # Convert to gt object
 table1_gt <- table1 %>% as_gt()
-
-# Save the table as a PNG file
+# Save the table
 gtsave(
   table1_gt, 
   filename = "./summary statistics/table1_descriptive_stats.png",
-  expand = 2 # Adjust this value to change the size of the output image
+  expand = 2
 )
 ```
 
@@ -134,8 +148,8 @@ top_20_diseases_plot <- ggplot(top_20_diseases, aes(x = reorder(Disease.Name, fr
   scale_y_continuous(labels = scales::comma) +
   theme(
     plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
-    axis.text.y = element_text(size = 24),
-    axis.title = element_text(size = 32, face = "bold")
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 16, face = "bold")
   )
 
 # Print the plot
@@ -159,8 +173,8 @@ total_diseases_histogram <- ggplot(cleaned_dog_data, aes(x = total_diseases)) +
   scale_x_continuous(breaks = seq(0, max(cleaned_dog_data$total_diseases), by = 2)) +
   scale_y_continuous(labels = scales::comma) +
   theme(
-    axis.title = element_text(size = 32, face = "bold"),
-    axis.text = element_text(size = 24)
+    axis.title = element_text(size = 16, face = "bold"),
+    axis.text = element_text(size = 12)
   )
 
 # Print the plot
@@ -172,5 +186,414 @@ ggsave("./summary statistics/total_diseases_distribution.png",
        width = 9, 
        height = 6, 
        dpi = 600)
+
+# Arrange plots vertically
+combined_plot <- plot_grid(total_diseases_histogram, top_20_diseases_plot, 
+                          ncol = 1,    # stack vertically
+                          rel_heights = c(1, 1))  # equal heights)
+
+# Save with appropriate height:width ratio
+# Since it's stacked vertically, make height about 2x the width
+ggsave("./supplementary figures/S1_Fig.tiff", 
+       combined_plot,
+       width = 8,      # in inches
+       height = 10,    # in inches
+       dpi = 600, 
+       compression = 'lzw')
+
+```
+
+```{r}
+table(cleaned_dog_data$total_diseases)
+1-(6636+5678+4382)/26523
+table(cleaned_dog_data$recode.sex)
+(679+1264)/26523
+table(cleaned_dog_data$lifestage)
+535/26523
+```
+
+```{r}
+
+# Calculate total conditions for each dog
+condition_cols <- grep("^(condition_|hs_cancer_types_)", names(cleaned_dog_data_all), value = TRUE)
+
+# Create analysis dataset
+analysis_data <- cleaned_dog_data_all %>%
+  mutate(
+    # Convert breed variables to factors
+    purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
+    # Calculate total conditions
+    total_conditions = rowSums(across(all_of(condition_cols), ~as.numeric(. > 0))),
+    # Convert age to numeric if it's not already
+    age = as.numeric(dd_age_years),
+    # Include weight
+    weight = as.numeric(dd_weight_lbs),
+    # Include sex variables (they should already be binary)
+    sex_2 = as.numeric(recode.sex_2),
+    sex_3 = as.numeric(recode.sex_3),
+    sex_4 = as.numeric(recode.sex_4)
+  ) %>%
+  select(purebred, age, weight, sex_2, sex_3, sex_4, total_conditions)
+
+# Fit expanded binomial model with logit link
+model <- glm(cbind(total_conditions, 1) ~ purebred + age + weight + sex_2 + sex_3 + sex_4, 
+            family = binomial(link = "logit"), 
+            data = analysis_data)
+
+# Get model summary
+summary_stats <- summary(model)
+
+# Calculate odds ratios and confidence intervals for all predictors
+coef_table <- summary_stats$coefficients
+odds_ratios <- data.frame(
+  Variable = rownames(coef_table),
+  Estimate = exp(coef_table[, "Estimate"]),
+  CI_Lower = exp(coef_table[, "Estimate"] - 1.96 * coef_table[, "Std. Error"]),
+  CI_Upper = exp(coef_table[, "Estimate"] + 1.96 * coef_table[, "Std. Error"]),
+  P_Value = coef_table[, "Pr(>|z|)"]
+)
+
+# Print results
+print(summary_stats)
+print(odds_ratios)
+```
+```{r}
+# Calculate total conditions and create binary healthy status
+analysis_data_zero <- cleaned_dog_data_all %>%
+  mutate(
+    # Convert breed variables to factors
+    purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
+    # Calculate total conditions
+    total_conditions = rowSums(across(starts_with(c("condition_", "hs_cancer_types_")), ~as.numeric(. > 0))),
+    # Create binary healthy status (0 = healthy, 1 = has conditions)
+    has_conditions = as.numeric(total_conditions > 0),
+    # Convert age to numeric if it's not already
+    age = as.numeric(dd_age_years),
+    # Include weight
+    weight = as.numeric(dd_weight_lbs),
+    # Include sex variables
+    sex_2 = as.numeric(recode.sex_2),
+    sex_3 = as.numeric(recode.sex_3),
+    sex_4 = as.numeric(recode.sex_4)
+  ) %>%
+  select(purebred, has_conditions, age, weight, sex_2, sex_3, sex_4)
+
+# Fit logistic regression model
+model_zero <- glm(has_conditions ~ purebred + age + weight + sex_2 + sex_3 + sex_4,
+                 family = binomial(link = "logit"),
+                 data = analysis_data_zero)
+
+# Get model summary
+summary_stats_zero <- summary(model_zero)
+
+# Calculate odds ratios and confidence intervals
+coef_table <- summary_stats_zero$coefficients
+odds_ratios <- data.frame(
+  Variable = rownames(coef_table),
+  Estimate = exp(coef_table[, "Estimate"]),
+  CI_Lower = exp(coef_table[, "Estimate"] - 1.96 * coef_table[, "Std. Error"]),
+  CI_Upper = exp(coef_table[, "Estimate"] + 1.96 * coef_table[, "Std. Error"]),
+  P_Value = coef_table[, "Pr(>|z|)"]
+)
+
+# Print results
+print(summary_stats_zero)
+print(odds_ratios)
+
+# Calculate and display proportions of healthy dogs in each group
+prop_table <- analysis_data_zero %>%
+  group_by(purebred) %>%
+  summarize(
+    Total_Dogs = n(),
+    Healthy_Dogs = sum(has_conditions == 0),
+    Proportion_Healthy = mean(has_conditions == 0),
+    SE = sqrt((Proportion_Healthy * (1-Proportion_Healthy))/Total_Dogs),
+    CI_Lower = Proportion_Healthy - 1.96*SE,
+    CI_Upper = Proportion_Healthy + 1.96*SE
+  )
+
+print(prop_table)
+
+```
+```{r}
+# Create combined IVDD column and prepare dataset for analysis
+diseases_data <- cleaned_dog_data_all %>%
+  mutate(
+    purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
+    ivdd_combined = as.numeric(condition_1111 > 0 | condition_1210 > 0),
+    age = as.numeric(dd_age_years),
+    weight = as.numeric(dd_weight_lbs),
+    sex_2 = as.numeric(recode.sex_2),
+    sex_3 = as.numeric(recode.sex_3),
+    sex_4 = as.numeric(recode.sex_4)
+  )
+
+# Updated list of diseases to analyze
+diseases <- c(
+    # Original diseases from first analysis
+    "hs_cancer_types_mast_cell_tumor",
+    "condition_405",  # Atopic dermatitis
+    "condition_1110", # Hip dysplasia
+    "condition_1108", # Elbow dysplasia
+    "condition_1215", # Epilepsy
+    "condition_102",  # Cataracts
+    "condition_1117", # Patellar luxation
+    "condition_1105", # Cruciate ligament
+    "condition_707",  # Bloat
+    "ivdd_combined",  # Combined IVDD
+    "condition_1312", # Hypothyroidism
+    "condition_1304", # Hypoadrenocorticism
+    "condition_1305", # Hyperadrenocorticism
+    "condition_511",  # Cardiomyopathy
+    
+    # Additional diseases from Belanger et al.
+    "condition_202",  # Ear infection
+    "condition_916",  # UTI
+    "condition_109",  # Corneal ulcer
+    "condition_104",  # KCS
+    "condition_112",  # Entropion
+    "condition_311",  # Retained deciduous teeth
+    "condition_1609", # Coccidia
+    "condition_305",  # Extracted teeth
+    "condition_1801", # Dog bite
+    "condition_306",  # Fractured teeth
+    "condition_1701", # Chocolate ingestion
+    "condition_1605", # Bordetella
+    "condition_411",  # Fleas
+    "condition_313",  # Underbite
+    "condition_304",  # Dental calculus
+    "condition_426",  # Seasonal allergies
+    "condition_1617", # Giardia
+    "condition_1113", # Osteoarthritis
+    "condition_1817", # Torn/broken toenail
+    "condition_504",  # Heart murmur
+    "condition_423",  # Pruritis
+    "condition_1812", # Laceration
+    "condition_428",  # Sebaceous cysts
+    "condition_412",  # Food/medicine allergies (skin)
+    "condition_307",  # Gingivitis
+    "condition_1634", # Roundworms
+    "condition_108",  # Conjunctivitis
+    "condition_1622", # Hookworms
+    "condition_406",  # Chronic hot spots
+    "condition_1627", # Lyme disease
+    "condition_708",  # Chronic diarrhea
+    "condition_705",  # Anal sac impaction
+    "condition_713",  # GI foreign body
+    "condition_712",  # Food/medicine allergies
+    "condition_205",  # Hearing loss
+    "condition_915",  # Urinary incontinence
+    "condition_809",  # Pancreatitis
+    "condition_1112", # Lameness
+    "condition_201",  # Deafness
+    "condition_914",  # Urinary crystals/stones
+    "condition_1601", # Anaplasmosis
+    "condition_1804", # Fractured bone (limb)
+    "condition_1805", # Fractured bone (other)
+    "condition_414",  # Lick granuloma
+    "condition_908",  # Chronic kidney disease
+    "condition_612",   # Tracheal collapse
+    "condition_426"
+)
+
+# Create empty lists to store results
+models <- list()
+results <- data.frame(
+  Disease = character(),
+  Estimate = numeric(),
+  StdError = numeric(),
+  OddsRatio = numeric(),
+  CI_Lower = numeric(),
+  CI_Upper = numeric(),
+  P_Value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Run models for each disease
+for(disease in diseases) {
+  # Fit model
+  formula <- as.formula(paste(disease, "~ purebred + age + weight + sex_2 + sex_3 + sex_4"))
+  model <- glm(formula, family = binomial(link = "logit"), data = diseases_data)
+  
+  # Store model
+  models[[disease]] <- model
+  
+  # Extract results
+  coef <- summary(model)$coefficients["purebredPure", ]
+  odds_ratio <- exp(coef["Estimate"])
+  ci <- exp(coef["Estimate"] + c(-1,1) * 1.96 * coef["Std. Error"])
+  
+  # Add to results dataframe
+  results <- rbind(results, data.frame(
+    Disease = disease,
+    Estimate = coef["Estimate"],
+    StdError = coef["Std. Error"],
+    OddsRatio = odds_ratio,
+    CI_Lower = ci[1],
+    CI_Upper = ci[2],
+    P_Value = coef["Pr(>|z|)"]
+  ))
+}
+
+# Apply Benjamini-Hochberg correction
+results$P_Adjusted <- p.adjust(results$P_Value, method = "BH")
+
+# Add disease prevalence
+results <- results %>%
+  mutate(
+    Prevalence_Mixed = sapply(Disease, function(d) {
+      mean(diseases_data[diseases_data$purebred == "Mixed", d], na.rm = TRUE)
+    }),
+    Prevalence_Pure = sapply(Disease, function(d) {
+      mean(diseases_data[diseases_data$purebred == "Pure", d], na.rm = TRUE)
+    })
+  )
+
+# Format disease names for readability
+disease_names <- c(
+   "Mast Cell Tumor" = "hs_cancer_types_mast_cell_tumor",
+   "Atopic Dermatitis" = "condition_405",
+   "Hip Dysplasia" = "condition_1110",
+   "Elbow Dysplasia" = "condition_1108",
+   "Epilepsy" = "condition_1215",
+   "Cataracts" = "condition_102",
+   "Patellar Luxation" = "condition_1117",
+   "Cruciate Ligament Rupture" = "condition_1105",
+   "Bloat" = "condition_707",
+   "IVDD" = "ivdd_combined",
+   "Hypothyroidism" = "condition_1312",
+   "Hypoadrenocorticism" = "condition_1304",
+   "Hyperadrenocorticism" = "condition_1305",
+   "Cardiomyopathy" = "condition_511",
+   "Ear Infection" = "condition_202",
+   "Urinary Tract Infection" = "condition_916",
+   "Corneal Ulcer" = "condition_109",
+   "KCS" = "condition_104",
+   "Entropion" = "condition_112",
+   "Retained Deciduous Teeth" = "condition_311",
+   "Coccidia" = "condition_1609",
+   "Extracted Teeth" = "condition_305",
+   "Dog Bite" = "condition_1801",
+   "Fractured Teeth" = "condition_306",
+   "Chocolate Ingestion" = "condition_1701",
+   "Bordetella" = "condition_1605",
+   "Fleas" = "condition_411",
+   "Underbite" = "condition_313",
+   "Dental Calculus" = "condition_304",
+   "Seasonal Allergies" = "condition_426",
+   "Giardia" = "condition_1617",
+   "Osteoarthritis" = "condition_1113",
+   "Torn/Broken Toenail" = "condition_1817",
+   "Heart Murmur" = "condition_504",
+   "Pruritis" = "condition_423",
+   "Laceration" = "condition_1812",
+   "Sebaceous Cysts" = "condition_428",
+   "Food/Medicine Allergies (Skin)" = "condition_412",
+   "Gingivitis" = "condition_307",
+   "Roundworms" = "condition_1634",
+   "Conjunctivitis" = "condition_108",
+   "Hookworms" = "condition_1622",
+   "Chronic Hot Spots" = "condition_406",
+   "Lyme Disease" = "condition_1627",
+   "Chronic Diarrhea" = "condition_708",
+   "Anal Sac Impaction" = "condition_705",
+   "GI Foreign Body" = "condition_713",
+   "Food/Medicine Allergies" = "condition_712",
+   "Hearing Loss" = "condition_205",
+   "Urinary Incontinence" = "condition_915",
+   "Pancreatitis" = "condition_809",
+   "Lameness" = "condition_1112",
+   "Deafness" = "condition_201",
+   "Urinary Crystals/Stones" = "condition_914",
+   "Anaplasmosis" = "condition_1601",
+   "Fractured Bone (Limb)" = "condition_1804",
+   "Fractured Bone (Other)" = "condition_1805",
+   "Lick Granuloma" = "condition_414",
+   "Chronic Kidney Disease" = "condition_908",
+   "Tracheal Collapse" = "condition_612",
+   "Seasonal allergies" = "condition_426"
+)
+
+results_formatted <- results %>%
+  mutate(
+    Disease = case_when(
+      Disease == "hs_cancer_types_mast_cell_tumor" ~ "Mast Cell Tumor",
+      Disease == "condition_405" ~ "Atopic Dermatitis",
+      Disease == "condition_104" ~ "Keratoconjunctivitis sicca (KCS)",
+      Disease == "condition_202" ~ "Ear Infection",
+      Disease == "condition_1801" ~ "Dog bite",
+      Disease == "condition_313" ~ "Underbite",
+      Disease == "condition_109" ~ "Corneal ulcer",
+      Disease == "condition_411" ~ "Fleas",
+      Disease == "ivdd_combined" ~ "Intervertebral disc disease (IVDD)",
+      Disease == "condition_112" ~ "Entropion",
+      Disease == "condition_916" ~ "Urinary tract infection",
+      Disease == "condition_311" ~ "Retained deciduous teeth",
+      Disease == "condition_1701" ~ "Chocolate ingestion",
+      Disease == "condition_1812" ~ "Laceration",
+      Disease == "condition_102" ~ "Cataracts",
+      Disease == "condition_1605" ~ "Bordetella and/or parainfluenza",
+      Disease == "condition_1609" ~ "Coccidia",
+      Disease == "condition_305" ~ "Extracted teeth",
+      Disease == "condition_1817" ~ "Torn or broken toenail",
+      Disease == "condition_1634" ~ "Roundworms",
+      Disease == "condition_809" ~ "Pancreatitis",
+      Disease == "condition_306" ~ "Fractured teeth",
+      Disease == "condition_205" ~ "Hearing loss",
+      Disease == "condition_423" ~ "Pruritis",
+      Disease == "condition_1105" ~ "Cruciate ligament rupture",
+      Disease == "condition_914" ~ "Urinary crystals or stones",
+      Disease == "condition_504" ~ "Heart murmur",
+      Disease == "condition_1622" ~ "Hookworms",
+      Disease == "condition_1215" ~ "Seizures",
+      Disease == "condition_707" ~ "Bloat with torsion",
+      Disease == "condition_307" ~ "Gingivitis",
+      Disease == "condition_712" ~ "Food or medicine allergies",
+      Disease == "condition_915" ~ "Urinary incontinence",
+      Disease == "condition_1108" ~ "Elbow dysplasia",
+      Disease == "condition_1617" ~ "Giardia",
+      Disease == "condition_428" ~ "Sebaceous cysts",
+      Disease == "condition_406" ~ "Chronic or recurrent hot spots",
+      Disease == "condition_708" ~ "Chronic or recurrent diarrhea",
+      Disease == "condition_1805" ~ "Fractured bone",
+      Disease == "condition_1627" ~ "Lyme disease",
+      Disease == "condition_201" ~ "Deafness",
+      Disease == "condition_1117" ~ "Patellar luxation",
+      Disease == "condition_426" ~ "Seasonal allergies",
+      Disease == "condition_705" ~ "Anal sac impaction",
+      Disease == "condition_1312" ~ "Hypothyroidism",
+      Disease == "condition_304" ~ "Dental calculus",
+      Disease == "condition_1304" ~ "Addison's disease",
+      Disease == "condition_1113" ~ "Osteoarthritis",
+      Disease == "condition_713" ~ "Foreign body ingestion",
+      Disease == "condition_1112" ~ "Lameness",
+      Disease == "condition_511" ~ "Cardiomyopathy",
+      Disease == "condition_414" ~ "Lick granuloma",
+      Disease == "condition_412" ~ "Food or medicine allergies affecting skin",
+      Disease == "condition_108" ~ "Conjunctivitis",
+      Disease == "condition_908" ~ "Chronic kidney disease",
+      Disease == "condition_1305" ~ "Cushing's disease",
+      Disease == "condition_1110" ~ "Hip dysplasia",
+      Disease == "condition_1804" ~ "Fractured bone (limb)",
+      Disease == "condition_612" ~ "Tracheal collapse",
+      Disease == "condition_1601" ~ "Anaplasmosis",
+      TRUE ~ Disease
+    )
+  ) %>%
+  arrange(P_Adjusted)
+
+# Print results
+print(results_formatted)
+
+# Create forest plot
+ggplot(results_formatted, aes(y = reorder(Disease, OddsRatio))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  geom_point(aes(x = OddsRatio), size = 3) +
+  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.2) +
+  scale_x_log10() +
+  theme_minimal() +
+  labs(x = "Odds Ratio (Purebred vs Mixed)",
+       y = "Disease") +
+  theme(text = element_text(size = 12))
 ```
 
