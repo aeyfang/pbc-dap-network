@@ -198,13 +198,13 @@ direct_expected_counts <- map_dfr(1:nrow(undirected_comorbid_pairs), ~{
 })
 
 write.csv(direct_expected_counts,"./directed network/direct_expected_and_actual_counts.csv")
-
 ```
 
 ```{r}
-# Calculate p-values and determine significance
+# Calculate p-values and determine significance with BH correction
 results <- direct_expected_counts %>%
   mutate(
+    # Calculate initial p-values
     p_value_1to2 = pnorm(count_disease1_first, 
                          mean = expected_disease1_before_disease2, 
                          sd = sqrt(variance_disease1_before_disease2), 
@@ -212,50 +212,114 @@ results <- direct_expected_counts %>%
     p_value_2to1 = pnorm(count_disease2_first, 
                          mean = expected_disease2_before_disease1, 
                          sd = sqrt(variance_disease2_before_disease1), 
-                         lower.tail = FALSE),
-    significant_1to2 = p_value_1to2 < 0.05,
-    significant_2to1 = p_value_2to1 < 0.05
+                         lower.tail = FALSE)
+  ) %>%
+  # Store all p-values in a vector for simultaneous correction
+  mutate(
+    adj_p_value_1to2 = p.adjust(p_value_1to2, method = "BH"),
+    adj_p_value_2to1 = p.adjust(p_value_2to1, method = "BH"),
+    significant_1to2 = adj_p_value_1to2 < 0.01,
+    significant_2to1 = adj_p_value_2to1 < 0.01
   )
 
-# Create output for Cytoscape with p-values
+# Create output for Cytoscape with both raw and adjusted p-values
 direct_significant_pairs <- results %>%
-  # Create rows for significant 1->2 relationships
+  # Create rows for significant 1->2 relationships using adjusted p-values
   {bind_rows(
     # When disease1 significantly precedes disease2
     filter(., significant_1to2) %>%
     dplyr::select(source = disease1, 
            target = disease2, 
-           p_value = p_value_1to2),
+           p_value = p_value_1to2,
+           adjusted_p_value = adj_p_value_1to2),
     
     # When disease2 significantly precedes disease1
     filter(., significant_2to1) %>%
     dplyr::select(source = disease2, 
            target = disease1, 
-           p_value = p_value_2to1)
-  )}
+           p_value = p_value_2to1,
+           adjusted_p_value = adj_p_value_2to1)
+  )} %>%
+  arrange(adjusted_p_value)  # Sort by adjusted p-value
 
 # Save formatted network attributes
-write_xlsx(direct_significant_pairs, "./network edges/direct_significant_pairs.xlsx")
+write_xlsx(direct_significant_pairs, "./network edges/direct_significant_pairs_01.xlsx")
 
-```
-
-```{r}
-# Create a lookup table for disease names
+# Create the disease lookup table
 disease_lookup <- disease_frequencies %>%
   dplyr::select(Code = Numerical.Codes, Disease.Name) %>%
-  mutate(Code = as.integer(Code))  # Convert Code to integer
+  mutate(Code = as.numeric(Code))  # Convert Code to numeric
 
-# Add disease names to the Cytoscape edges
+# Add disease names to the Cytoscape edges and include both p-values
 lookup_table <- direct_significant_pairs %>%
   left_join(disease_lookup, by = c("source" = "Code")) %>%
   rename(source_name = Disease.Name) %>%
   left_join(disease_lookup, by = c("target" = "Code")) %>%
-  rename(target_name = Disease.Name)
+  rename(target_name = Disease.Name) %>%
+  # Include both raw and adjusted p-values
+  dplyr::select(source, source_name, target, target_name, p_value, adjusted_p_value)
 
-# Reorder columns
-lookup_table <- lookup_table %>%
-  dplyr::select(source, source_name, target, target_name, p_value)
+# Save the lookup table with both p-values
+write.csv(lookup_table, "./lookup tables/lookup_directed_01.csv", row.names = FALSE)
 
-write.csv(lookup_table,"./lookup tables/lookup_direct.csv", row.names = F)
+# Create comprehensive results with one row per direction
+comprehensive_results <- results %>%
+  # First create rows for direction 1->2
+  {bind_rows(
+    # disease1 -> disease2 direction
+    dplyr::select(., 
+      disease1, disease2,
+      raw_p_value = p_value_1to2,
+      adjusted_p_value = adj_p_value_1to2,
+      significant = significant_1to2,
+      expected_count = expected_disease1_before_disease2,
+      actual_count = count_disease1_first,
+      variance = variance_disease1_before_disease2
+    ) %>%
+    mutate(
+      source = disease1,
+      target = disease2,
+      direction = "forward"
+    ),
+    
+    # disease2 -> disease1 direction
+    dplyr::select(., 
+      disease1, disease2,
+      raw_p_value = p_value_2to1,
+      adjusted_p_value = adj_p_value_2to1,
+      significant = significant_2to1,
+      expected_count = expected_disease2_before_disease1,
+      actual_count = count_disease2_first,
+      variance = variance_disease2_before_disease1
+    ) %>%
+    mutate(
+      source = disease2,
+      target = disease1,
+      direction = "reverse"
+    )
+  )} %>%
+  # Add disease names
+  left_join(disease_lookup, by = c("source" = "Code")) %>%
+  rename(source_name = Disease.Name) %>%
+  left_join(disease_lookup, by = c("target" = "Code")) %>%
+  rename(target_name = Disease.Name) %>%
+  # Select and arrange final columns
+  dplyr::select(
+    source, source_name,
+    target, target_name,
+    direction,
+    raw_p_value,
+    adjusted_p_value,
+    significant,
+    expected_count,
+    actual_count,
+    variance
+  ) %>%
+  arrange(raw_p_value)  # Sort by raw p-value
+
+# Save the comprehensive results
+write.csv(comprehensive_results, 
+          "./CSV network edges/all_directed_edges_01.csv", 
+          row.names = FALSE)
 ```
 

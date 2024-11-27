@@ -155,6 +155,9 @@ clean_data <- function(data) {
   return(data)
 }
 
+# This will include dogs with no diseases
+write.csv(merged_data, "./clean data/merged_data_with_no_diseases.csv", row.names = FALSE)
+
 # Apply criteria to original dataset
 merged_data_cleaned <- clean_data(merged_data)
 
