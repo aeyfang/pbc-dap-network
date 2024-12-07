@@ -10,16 +10,21 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(readr)
-library(purrr)
+library(furrr)
 library(haven)
 library(readxl)
 library(writexl)
+library(ggplot2)
+
+plan(multisession)
 ```
 
 ```{r}
 # Read in data
-load.Rdata(filename="./DAP_2021_HLES_health_conditions_v1.0.RData", objname = "health_condition")
-load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dog_owner")
+load("./DAP_2021_HLES_health_conditions_v1.0.RData")
+health_condition<-HLES_health_conditions
+load("./DAP_2021_HLES_dog_owner_v1.0.RData")
+dog_owner<-HLES_dog_owner
 cleaned_data<-read.csv("./clean data/cleaned_all.csv")
 personalized_probability<-read.csv("./undirected network/personalized_probability_with_variance_all.csv")
 personalized_probability<-cbind(dog_id = cleaned_data$dog_id,personalized_probability)
@@ -114,7 +119,7 @@ write.csv(check_data, "./directed network/diagnosis_date_data.csv", row.names = 
 # Boxplot of medical record length vs Age at Last Diagnosis
 p <- ggplot(data = check_data, aes(x = age_cat, y = record_length_years, fill = age_cat)) +
   geom_boxplot() +
-  labs(x = "Age at Last Diagnosis (yrs)",
+  labs(x = "Age at Last Recorded Health Condition (yrs)",
        y = "Length of Medical Record (yrs)",
        fill = "Age Category") +
   theme_minimal() +
@@ -128,80 +133,194 @@ p <- ggplot(data = check_data, aes(x = age_cat, y = record_length_years, fill = 
 
 p
 
-ggsave("./results images/record_length_vs_age_boxplot.png", p, 
-       width = 9, height = 6, dpi = 600)
+ggsave("./supplementary figures/S3_Fig.tiff", p, 
+       width = 9, height = 6, dpi = 600, compression ="lzw")
 ```
-
 ```{r}
-# Function to analyze temporal relationships and calculate probabilities for a disease pair
-analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condition, personalized_probability) {
-  
-  # Convert disease1 and disease2 to character explicitly
-  disease1 <- as.numeric(disease1)
-  disease2 <- as.numeric(disease2)
-  
-  # Identify dogs with both diseases
-  dogs_with_both <- cleaned_data %>%
-    filter(!!sym(paste0("condition_", disease1)) == 1 & 
-           !!sym(paste0("condition_", disease2)) == 1) %>%
-    pull(dog_id)
-  
-  # Get relevant health condition data
-  relevant_conditions <- health_condition %>%
-    filter(dog_id %in% dogs_with_both & 
-           hs_condition %in% c(disease1, disease2)) %>%
-    group_by(dog_id) %>%
-    filter(n() == 2) %>%  # Ensure each dog has exactly two rows (one for each disease)
-    ungroup()
-  
-  # Calculate temporal relationships and probabilities
-  temporal_probs <- relevant_conditions %>%
-    group_by(dog_id) %>%
-    arrange(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
-    summarize(
-      first_disease = first(hs_condition),
-      months_between = (last(hs_diagnosis_year) - first(hs_diagnosis_year)) * 12 +
-                       (last(hs_diagnosis_month) - first(hs_diagnosis_month)),
-      .groups = "drop"
-    ) %>%
-    left_join(personalized_probability, by = "dog_id") %>%
+# Convert health_condition to right data type
+health_condition <- health_condition %>%
     mutate(
-      prob_disease1 = !!sym(paste0("condition_", disease1)),
-      prob_disease2 = !!sym(paste0("condition_", disease2)),
-      prob_disease1_given_either = prob_disease1 / (prob_disease1 + prob_disease2),
-      prob_disease2_given_either = prob_disease2 / (prob_disease1 + prob_disease2),
-      prob_within_time_window = if_else(months_between <= 12, 1, 
-                                        (12 / months_between) * (2 - 12 / months_between)),
-      prob_disease1_before_disease2 = prob_disease1_given_either * prob_within_time_window,
-      prob_disease2_before_disease1 = prob_disease2_given_either * prob_within_time_window
+        hs_diagnosis_year = as.numeric(as.character(hs_diagnosis_year)),
+        hs_diagnosis_month = as.numeric(as.character(hs_diagnosis_month)),
+        hs_condition = as.numeric(as.character(hs_condition)),
+        dog_id = as.numeric(as.character(dog_id))  # Add this line
     )
-  
-  # Calculate expected counts and variances
-  results <- temporal_probs %>%
-    summarize(
-      expected_disease1_before_disease2 = sum(prob_disease1_before_disease2),
-      expected_disease2_before_disease1 = sum(prob_disease2_before_disease1),
-      variance_disease1_before_disease2 = sum(prob_disease1_before_disease2 * (1 - prob_disease1_before_disease2)),
-      variance_disease2_before_disease1 = sum(prob_disease2_before_disease1 * (1 - prob_disease2_before_disease1)),
-      count_disease1_first = sum(first_disease == disease1 & months_between <= 12),
-      count_disease2_first = sum(first_disease == disease2 & months_between <= 12)
+
+# Make sure cleaned_data dog_id is also numeric
+cleaned_data <- cleaned_data %>%
+    mutate(
+        dog_id = as.numeric(as.character(dog_id))
     )
+
+# Make sure personalized_probability dog_id is numeric 
+personalized_probability <- personalized_probability %>%
+    mutate(
+        dog_id = as.numeric(as.character(dog_id))
+    )
+
+# Create comprehensive mapping dataframe from disease_frequencies
+disease_mapping <- disease_frequencies %>%
+  mutate(
+    column_name = case_when(
+      # For cancer types
+      Disease.Category == "Cancer" ~ paste0("hs_cancer_types_", tolower(gsub(" ", "_", Disease.Name))),
+      # For other conditions
+      TRUE ~ paste0("condition_", Numerical.Codes)
+    ),
+    disease_code = as.character(Numerical.Codes)
+  ) %>%
+  dplyr::select(disease_code, column_name, Disease.Name, Disease.Category, Numerical.Codes)
+
+# Function to get column name using the mapping
+get_column_name <- function(disease_code) {
+  col_name <- disease_mapping %>%
+    filter(disease_code == !!disease_code) %>%
+    pull(column_name)
   
-  return(c(list(disease1 = disease1, disease2 = disease2), results))
+  if(length(col_name) == 0) {
+    warning(paste("No mapping found for disease code:", disease_code))
+    return(NULL)
+  }
+  return(col_name)
 }
 
-# Analyze all disease pairs
-direct_expected_counts <- map_dfr(1:nrow(undirected_comorbid_pairs), ~{
-  disease_pair <- undirected_comorbid_pairs[.x, ]
-  analyze_disease_pair(disease_pair$Disease1, disease_pair$Disease2, 
-                       cleaned_data, health_condition, personalized_probability)
-})
+# Analyze disease pair function
+analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condition, personalized_probability, disease_mapping, window_size = 12) {
+  
+  # Convert disease codes to proper column names
+  col1 <- get_column_name(disease1)
+  col2 <- get_column_name(disease2)
+  
+  # Early exit if mapping not found
+  if(is.null(col1) || is.null(col2)) {
+    warning(paste("Could not map disease codes:", disease1, "or", disease2))
+    return(NULL)
+  }
+  
+  # Early exit if columns don't exist
+  if(!(col1 %in% colnames(cleaned_data)) || !(col2 %in% colnames(cleaned_data))) {
+    warning(paste("Missing column(s):", col1, "or", col2))
+    return(NULL)
+  }
 
-write.csv(direct_expected_counts,"./directed network/direct_expected_and_actual_counts.csv")
+  # Helper function to check if cancer
+  is_cancer <- function(disease_code) {
+    disease_mapping %>%
+      filter(disease_code == !!disease_code) %>%
+      pull(Disease.Category) == "Cancer"
+  }
+  
+  # Pre-filter health_condition data and handle missing dates
+  dogs_disease1 <- health_condition %>%
+    filter(hs_condition == disease1,
+           !is.na(hs_diagnosis_year), 
+           !is.na(hs_diagnosis_month)) %>%
+    pull(dog_id)
+  
+  dogs_disease2 <- health_condition %>%
+    filter(hs_condition == disease2,
+           !is.na(hs_diagnosis_year), 
+           !is.na(hs_diagnosis_month)) %>%
+    pull(dog_id)
+  
+  # Find common dogs
+  dogs_with_both <- intersect(dogs_disease1, dogs_disease2)
+  dogs_with_both <- as.character(dogs_with_both)
+  
+  # Early exit if no dogs have both conditions
+  if(length(dogs_with_both) == 0) {
+    warning(paste("No dogs found with both", disease1, "and", disease2))
+    return(NULL)
+  }
+  
+  # Get temporal data for disease1
+  temporal_data1 <- health_condition %>%
+    filter(dog_id %in% dogs_with_both,
+           hs_condition == disease1) %>%
+    dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
+    mutate(
+        year1 = hs_diagnosis_year,
+        month1 = hs_diagnosis_month
+    )
+  
+  # Get temporal data for disease2
+  temporal_data2 <- health_condition %>%
+    filter(dog_id %in% dogs_with_both,
+           hs_condition == disease2) %>%
+    dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
+    mutate(
+        year2 = hs_diagnosis_year,
+        month2 = hs_diagnosis_month
+    )
+  
+  # Join temporal data and calculate window probabilities
+  temporal_data <- inner_join(temporal_data1, temporal_data2, by = "dog_id") %>%
+    mutate(
+      months_between = abs((year2 - year1) * 12 + (month2 - month1)),
+      window_prob = case_when(
+        months_between <= window_size ~ 1,
+        TRUE ~ (window_size/months_between) * (2 - window_size/months_between)
+      ),
+      first_disease = if_else(
+        year1 < year2 | (year1 == year2 & month1 <= month2),
+        disease1, disease2
+      )
+    )
+  
+  # Get probabilities
+  prob_data <- personalized_probability[personalized_probability$dog_id %in% dogs_with_both, 
+                                      c("dog_id", col1, col2)]
+  
+  # Calculate results with disease names
+  disease1_name <- disease_mapping %>% filter(disease_code == disease1) %>% pull(Disease.Name)
+  disease2_name <- disease_mapping %>% filter(disease_code == disease2) %>% pull(Disease.Name)
+  
+  results <- data.frame(
+    disease1 = disease1,
+    disease2 = disease2,
+    disease1_name = disease1_name,
+    disease2_name = disease2_name,
+    expected_disease1_before_disease2 = sum(prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob),
+    expected_disease2_before_disease1 = sum(prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob),
+    variance_disease1_before_disease2 = sum(
+      (prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob) * 
+      (1 - prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob)
+    ),
+    variance_disease2_before_disease1 = sum(
+      (prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob) * 
+      (1 - prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob)
+    ),
+    count_disease1_first = sum((temporal_data$first_disease == disease1) * temporal_data$window_prob),
+    count_disease2_first = sum((temporal_data$first_disease == disease2) * temporal_data$window_prob)
+  )
+  
+  return(results)
+}
+
+# Run the parallel mapping
+direct_expected_counts <- future_map_dfr(1:nrow(undirected_comorbid_pairs), ~{
+  disease_pair <- undirected_comorbid_pairs[.x, ]
+  analyze_disease_pair(
+      disease_pair$Disease1,
+      disease_pair$Disease2,
+      cleaned_data = cleaned_data,
+      health_condition = health_condition,
+      personalized_probability = personalized_probability,
+      disease_mapping = disease_mapping
+  )
+}, .options = furrr_options(seed = TRUE))
+
+# Remove any NULL results and save
+direct_expected_counts <- direct_expected_counts %>% 
+  filter(!is.na(disease1))
+
+write.csv(direct_expected_counts, 
+          "./directed network/direct_expected_and_actual_counts.csv", 
+          row.names = FALSE)
 ```
 
 ```{r}
-# Calculate p-values and determine significance with BH correction
+# Calculate p-values and determine significance with bonferroni correction
 results <- direct_expected_counts %>%
   mutate(
     # Calculate initial p-values
@@ -216,8 +335,8 @@ results <- direct_expected_counts %>%
   ) %>%
   # Store all p-values in a vector for simultaneous correction
   mutate(
-    adj_p_value_1to2 = p.adjust(p_value_1to2, method = "BH"),
-    adj_p_value_2to1 = p.adjust(p_value_2to1, method = "BH"),
+    adj_p_value_1to2 = p.adjust(p_value_1to2, method = "bonferroni"),
+    adj_p_value_2to1 = p.adjust(p_value_2to1, method = "bonferroni"),
     significant_1to2 = adj_p_value_1to2 < 0.01,
     significant_2to1 = adj_p_value_2to1 < 0.01
   )
@@ -245,22 +364,30 @@ direct_significant_pairs <- results %>%
 # Save formatted network attributes
 write_xlsx(direct_significant_pairs, "./network edges/direct_significant_pairs_01.xlsx")
 
-# Create the disease lookup table
-disease_lookup <- disease_frequencies %>%
-  dplyr::select(Code = Numerical.Codes, Disease.Name) %>%
-  mutate(Code = as.numeric(Code))  # Convert Code to numeric
+# First let's check the actual column names
+names(disease_frequencies)  
 
-# Add disease names to the Cytoscape edges and include both p-values
+# Create a lookup table for disease names 
+disease_lookup <- disease_frequencies %>%
+  dplyr::select(Code = `Numerical.Codes`, Disease.Name = `Disease.Name`) %>%
+  mutate(Code = as.character(Code))  # Convert Code to character
+
+# Add disease names to the Cytoscape edges
 lookup_table <- direct_significant_pairs %>%
+  mutate(
+    source = as.character(source),  # Ensure source is character
+    target = as.character(target)   # Ensure target is character
+  ) %>%
   left_join(disease_lookup, by = c("source" = "Code")) %>%
   rename(source_name = Disease.Name) %>%
   left_join(disease_lookup, by = c("target" = "Code")) %>%
-  rename(target_name = Disease.Name) %>%
-  # Include both raw and adjusted p-values
-  dplyr::select(source, source_name, target, target_name, p_value, adjusted_p_value)
+  rename(target_name = Disease.Name)
 
-# Save the lookup table with both p-values
-write.csv(lookup_table, "./lookup tables/lookup_directed_01.csv", row.names = FALSE)
+# Reorder columns
+lookup_table <- lookup_table %>%
+  dplyr::select(source, source_name, target, target_name, p_value)
+
+write.csv(lookup_table, "./lookup tables/lookup_direct.csv", row.names = FALSE)
 
 # Create comprehensive results with one row per direction
 comprehensive_results <- results %>%

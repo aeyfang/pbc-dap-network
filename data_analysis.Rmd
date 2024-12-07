@@ -12,13 +12,17 @@ library(caret)
 library(writexl)
 library(dplyr)
 library(furrr)
-library(Matrix)
+
+# Set up parallel processing
+plan(multisession)
 ```
 
 ```{r setup}
 # import data 
 data<-read.csv("./clean data/cleaned_all.csv")
 disease_frequencies<-read.csv("./frequency tables/disease_frequencies_all.csv")
+disease_frequencies <- disease_frequencies %>%
+  mutate(Disease.Name = tolower(Disease.Name)) # Normalize to lowercase
 
 # Sort data by a unique identifier
 data <- data %>% arrange(dog_id)  # Assuming dog_id is a unique identifier
@@ -37,7 +41,7 @@ responses <- data %>%
 # Function to get numerical code for cancer types
 get_cancer_code <- function(cancer_type) {
   if (is.character(cancer_type) && startsWith(cancer_type, "hs_cancer_types_")) {
-    cancer_name <- sub("hs_cancer_types_", "", cancer_type)
+    cancer_name <- tolower(sub("hs_cancer_types_", "", cancer_type))
     code <- disease_frequencies %>%
       filter(Disease.Name == cancer_name) %>%
       pull(Numerical.Codes)
@@ -54,6 +58,43 @@ clean_disease_name <- function(name) {
     return(get_cancer_code(name))
   }
   return(name)
+}
+
+# Function to calculate jacobian matrix for logistic regression
+calculate_jacobian <- function(predictors, coefficients) {
+  # Convert inputs to appropriate formats
+  predictors <- as.matrix(predictors) 
+  coefficients <- as.numeric(coefficients) 
+  # Add intercept column to predictors
+  predictors_with_intercept <- cbind(1, predictors) 
+  linear_predictor <- predictors_with_intercept %*% coefficients 
+  # Calculate derivative of inverse logit function
+  deriv <- as.vector(exp(-linear_predictor) / (1 + exp(-linear_predictor))^2) 
+  jacobian <- matrix(deriv, nrow = 1) %*% predictors_with_intercept / nrow(predictors)   
+  return(jacobian)
+}
+
+# Function to calculate individual variances for each prediction
+calculate_delta_variance <- function(predictors, coefficients, vcov_matrix) {
+  # Convert inputs to appropriate formats
+  predictors <- as.matrix(predictors)
+  coefficients <- as.numeric(coefficients)
+  vcov_matrix <- as.matrix(vcov_matrix)
+  # Add intercept column
+  predictors_with_intercept <- cbind(1, predictors)
+  # Calculate linear predictor
+  linear_predictor <- predictors_with_intercept %*% coefficients
+  # Calculate derivative for each observation
+  deriv <- exp(-linear_predictor) / (1 + exp(-linear_predictor))^2
+  # Calculate individual variances
+  variances <- sapply(1:nrow(predictors), function(i) {
+    # Calculate jacobian for this observation
+    jacobian <- matrix(deriv[i] * predictors_with_intercept[i,], nrow = 1)
+    # Calculate variance for this observation
+    var <- jacobian %*% vcov_matrix %*% t(jacobian)
+    return(as.numeric(var))
+  })
+  return(variances)
 }
 
 # Create standardized disease lookup table
@@ -130,105 +171,52 @@ write.csv(coef_df_named,
 ```
 
 ```{r calculate individual probabilities}
-# Function to calculate probability
-calculate_probability <- function(predictors, coefficients) {
-  predictors_with_intercept <- cbind(1, predictors)
-  linear_predictor <- as.matrix(predictors_with_intercept) %*% coefficients
-  prob <- 1 / (1 + exp(-linear_predictor))
-  return(prob)
-}
-
-# Calculate risks for all diseases
-risk_scores <- map(1:nrow(coef_df), function(i) {
-  disease_coeffs <- as.numeric(coef_df[i, -1])
-  calculate_probability(predictors, disease_coeffs)
+# Calculate risks and variances for all diseases
+risk_scores <- map(names(responses), function(disease) {
+  # Get response
+  response <- responses[[disease]]
+  
+  # Fit logistic regression
+  model <- glm(response ~ ., data = predictors, family = binomial(link = "logit"))
+  
+  # Calculate probabilities
+  linear_pred <- predict(model, type = "link")
+  probabilities <- 1 / (1 + exp(-linear_pred))
+  
+  # Get actual count for normalization
+  actual_count <- sum(response)
+  # Normalize probabilities
+  scaling_factor <- actual_count / sum(probabilities)
+  normalized_probs <- probabilities * scaling_factor
+  
+  # Calculate individual variances using delta method
+  initial_variances <- calculate_delta_variance(predictors, coef(model), vcov(model))
+  adjusted_variances <- initial_variances * scaling_factor^2
+  
+  list(
+    probabilities = normalized_probs,
+    variance = adjusted_variances
+  )
 })
 
-# Combine results into dataframe
-risk_scores_df <- as.data.frame(do.call(cbind, risk_scores))
-colnames(risk_scores_df) <- coef_df$Disease
+# Extract probabilities and variances
+risk_scores_df <- map(risk_scores, "probabilities") %>% 
+  bind_cols() %>%
+  setNames(names(responses))
 
-# Normalize probabilities
-normalize_probabilities <- function(risk_scores_df, data) {
-  normalized_scores <- map2_df(risk_scores_df, names(risk_scores_df), function(probabilities, disease) {
-    actual_count <- sum(data[[disease]])
-    total_prob <- sum(probabilities)
-    scaling_factor <- actual_count / total_prob
-    return(probabilities * scaling_factor)
-  })
-  names(normalized_scores) <- names(risk_scores_df)
-  return(normalized_scores)
-}
+variance_df <- map(risk_scores, "variance") %>% 
+  bind_cols() %>%
+  setNames(names(responses))
 
-risk_scores_df <- normalize_probabilities(risk_scores_df, responses)
-```
-
-```{r calculate variance}
-# Function to create stratified folds and fit models
-create_stratified_folds_and_fit_models <- function(response, predictors, k = 6) {
-  data <- cbind(response, predictors)
-  
-  # Separate positive and negative cases
-  positive_cases <- data[response == 1, ]
-  negative_cases <- data[response == 0, ]
-  
-  # Create balanced folds
-  create_balanced_folds <- function(cases, k) {
-    n <- nrow(cases)
-    fold_size <- floor(n / k)
-    folds <- rep(1:k, each = fold_size, length.out = n)
-    set.seed(42)
-    folds <- sample(folds)
-    split(seq_len(n), folds)
-  }
-  
-  positive_folds <- create_balanced_folds(positive_cases, k)
-  negative_folds <- create_balanced_folds(negative_cases, k)
-  combined_folds <- map2(positive_folds, negative_folds, c)
-  
-  # Fit models for each fold
-  models <- map(combined_folds, function(fold) {
-    fold_data <- data[fold, ]
-    model <- glm(response ~ ., data = fold_data, family = binomial(link = "logit"))
-    return(coef(model))
-  })
-  
-  return(models)
-}
-
-# Create stratified folds and fit models
-stratified_models <- map2(
-  responses,   
-  rep(list(predictors), ncol(responses)),
-  create_stratified_folds_and_fit_models
-)
-
-# Calculate probabilities for all folds
-calculate_all_probabilities <- function(fold_coefs, full_predictors) {
-  map(fold_coefs, ~calculate_probability(full_predictors, .x))
-}
-
-all_probabilities <- future_map(
-  stratified_models,
-  ~calculate_all_probabilities(.x, predictors),
-  .options = furrr_options(seed = TRUE)
-)
-
-# Calculate mean probabilities and variance
-mean_probabilities <- map(all_probabilities, ~Reduce(`+`, .x) / length(.x))
-
-calculate_variance <- function(probs, mean_prob) {
-  variance <- Reduce(`+`, map(probs, ~.x - mean_prob^2)) / (length(probs) - 1)
-  return(variance)
-}
-
-unbiased_variance <- map2(all_probabilities, mean_probabilities, calculate_variance)
-variance_df <- as.data.frame(do.call(cbind, unbiased_variance))
-colnames(variance_df) <- colnames(responses)
-
+# Save results
+write.csv(risk_scores_df, 
+          "./undirected network/personalized_probability_all.csv", 
+          row.names = FALSE)
 write.csv(variance_df, 
-          "./undirected network/personalized_probability_with_variance_all.csv", row.names = FALSE)
+          "./undirected network/personalized_probability_with_variance_all.csv", 
+          row.names = FALSE)
 ```
+
 
 ```{r identify comorbid pairs}
 # Function to calculate pair statistics
@@ -261,8 +249,12 @@ calculate_pair_statistics <- function(pair) {
     PValue = p_value)
 }
 
-# Generate all pairs and calculate statistics
-network_attributes <- combn(names(responses), 2, calculate_pair_statistics, simplify = FALSE)
+# Generate all pairs and calculate statistics in parallel
+network_attributes <- future_map(
+  combn(names(responses), 2, simplify = FALSE),
+  calculate_pair_statistics,
+  .options = furrr_options(seed = TRUE)
+)
 
 # Create network dataframe
 network_df <- do.call(rbind, network_attributes) %>% 
@@ -270,14 +262,14 @@ network_df <- do.call(rbind, network_attributes) %>%
   mutate(across(TestValue:PValue, as.numeric))
 
 # Apply multiple testing correction
-network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "BH")
+network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "bonferroni")
 
 # Save all pairs with variances
 write.csv(network_df, "./summary statistics/all_pairs_variances.csv")
 
 # Filter significant pairs
 significant_pairs <- network_df %>% 
-  filter(AdjustedPValue < 0.01) %>%
+  filter(AdjustedPValue < 0.001) %>%
   arrange(AdjustedPValue)
 
 # Format significant pairs for Cytoscape
@@ -296,7 +288,6 @@ write_xlsx(formatted_significant_pairs,
            "./network edges/formatted_pairs_all.xlsx")
 ```
 
-
 ```{r reference tables}
 # Create final reference table with p-values
 lookup_table <- formatted_significant_pairs %>%
@@ -308,18 +299,18 @@ lookup_table <- formatted_significant_pairs %>%
   left_join(
     disease_frequencies %>%
       mutate(code = as.character(Numerical.Codes)) %>%
-      select(code, Disease.Name),
+      dplyr::select(code, Disease.Name),  # Explicitly use dplyr::select
     by = c("Disease1" = "code")
   ) %>%
   rename(Disease1_name = Disease.Name) %>%
   left_join(
     disease_frequencies %>%
       mutate(code = as.character(Numerical.Codes)) %>%
-      select(code, Disease.Name),
+      dplyr::select(code, Disease.Name),  # Explicitly use dplyr::select
     by = c("Disease2" = "code")
   ) %>%
   rename(Disease2_name = Disease.Name) %>%
-  select(Disease1, Disease1_name, Disease2, Disease2_name) %>%
+  dplyr::select(Disease1, Disease1_name, Disease2, Disease2_name) %>%  # Explicitly use dplyr::select
   cbind(pval = significant_pairs$AdjustedPValue)
 
 write.csv(lookup_table, 
@@ -336,18 +327,18 @@ comprehensive_table <- network_df %>%
   left_join(
     disease_frequencies %>%
       mutate(code = as.character(Numerical.Codes)) %>%
-      select(code, Disease.Name),
+      dplyr::select(code, Disease.Name),
     by = c("Disease1_key" = "code")
   ) %>%
   rename(Disease1_name = Disease.Name) %>%
   left_join(
     disease_frequencies %>%
       mutate(code = as.character(Numerical.Codes)) %>%
-      select(code, Disease.Name),
+      dplyr::select(code, Disease.Name),
     by = c("Disease2_key" = "code")
   ) %>%
   rename(Disease2_name = Disease.Name) %>%
-  select(
+  dplyr::select(
     Disease1, Disease1_key, Disease1_name,
     Disease2, Disease2_key, Disease2_name,
     TestValue, ExpectedValue, 
@@ -361,89 +352,5 @@ write.csv(comprehensive_table,
           row.names = FALSE)
 ```
 
-```{r}
-# Focus on specific diseases
-diseases_of_interest <- c(
-  "condition_908",  # Chronic kidney disease (CKD)
-  "condition_1307", # Diabetes mellitus
-  "condition_514"   # Hypertension
-)
 
-# Extract relevant predictors and responses
-predictors <- data %>%
-  dplyr::select(dd_age_years, dd_weight_lbs, dd_breed_pure_or_mixed,
-                recode.sex_2, recode.sex_3, recode.sex_4)
-
-responses <- data %>%
-  dplyr::select(all_of(diseases_of_interest))
-
-# Add intercept term to predictors
-X <- as.matrix(cbind(1, predictors))
-
-# Function to analyze linear predictor distribution
-analyze_linear_predictor <- function(disease_name, response, X) {
-  # Fit logistic regression
-  model <- glm(response ~ X - 1, family = binomial(link = "logit"))
-  
-  # Calculate linear predictor for all individuals
-  linear_pred <- X %*% coef(model)
-  
-  # Get summary statistics
-  summary_stats <- c(
-    min = min(linear_pred),
-    q1 = quantile(linear_pred, 0.25),
-    median = median(linear_pred),
-    mean = mean(linear_pred),
-    q3 = quantile(linear_pred, 0.75),
-    max = max(linear_pred),
-    range = diff(range(linear_pred))
-  )
-  
-  # Calculate probability ranges
-  probs <- 1/(1 + exp(-linear_pred))
-  prob_stats <- c(
-    min_prob = min(probs),
-    max_prob = max(probs)
-  )
-  
-  list(
-    disease = disease_name,
-    linear_pred_stats = summary_stats,
-    prob_stats = prob_stats,
-    linear_pred = linear_pred
-  )
-}
-
-# Analyze each disease
-results <- map(diseases_of_interest, function(disease) {
-  analyze_linear_predictor(disease, responses[[disease]], X)
-})
-
-# Print results
-disease_names <- c(
-  "condition_908" = "Chronic Kidney Disease",
-  "condition_1307" = "Diabetes Mellitus", 
-  "condition_514" = "Hypertension"
-)
-
-for(i in seq_along(results)) {
-  cat("\nResults for", disease_names[diseases_of_interest[i]], ":\n")
-  cat("\nLinear Predictor (betahat' x_i) Statistics:\n")
-  print(round(results[[i]]$linear_pred_stats, 4))
-  cat("\nProbability Range:\n")
-  print(round(results[[i]]$prob_stats, 4))
-  
-  # Create histogram of linear predictors
-  hist_data <- data.frame(linear_pred = results[[i]]$linear_pred)
-  print(
-    ggplot(hist_data, aes(x = linear_pred)) +
-      geom_histogram(bins = 50, fill = "blue", alpha = 0.5) +
-      ggtitle(paste("Distribution of Linear Predictors for", 
-                    disease_names[diseases_of_interest[i]])) +
-      xlab("Linear Predictor (betahat' x_i)") +
-      ylab("Count") +
-      theme_minimal()
-  )
-}
-```
 
