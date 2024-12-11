@@ -18,30 +18,30 @@ plan(multisession)
 ```
 
 ```{r setup}
-# import data 
-data<-read.csv("./clean data/cleaned_all.csv")
-disease_frequencies<-read.csv("./frequency tables/disease_frequencies_all.csv")
-disease_frequencies <- disease_frequencies %>%
-  mutate(Disease.Name = tolower(Disease.Name)) # Normalize to lowercase
+# Import and prepare data
+data <- read.csv("./clean data/cleaned_all.csv")
+disease_frequencies <- read.csv("./frequency tables/disease_frequencies_all.csv")
 
-# Sort data by a unique identifier
-data <- data %>% arrange(dog_id)  # Assuming dog_id is a unique identifier
+# Sort data by unique identifier
+data <- data %>% arrange(dog_id)
 
 # Separate predictors
 predictors <- data %>%
-  dplyr::select(dd_age_years, dd_weight_lbs, dd_breed_pure_or_mixed,
-         recode.sex_2, recode.sex_3, recode.sex_4)
+  dplyr::select(
+    dd_age_years, dd_weight_lbs, dd_breed_pure_or_mixed,
+    recode.sex_2, recode.sex_3, recode.sex_4
+  )
 
 # Separate response variables
 responses <- data %>%
-  dplyr::select(starts_with("condition_"), starts_with("hs_cancer_types"))
+  dplyr::select(matches("^(condition_|hs_cancer_types)"))
 ```
 
 ```{r helper functions}
 # Function to get numerical code for cancer types
 get_cancer_code <- function(cancer_type) {
   if (is.character(cancer_type) && startsWith(cancer_type, "hs_cancer_types_")) {
-    cancer_name <- tolower(sub("hs_cancer_types_", "", cancer_type))
+    cancer_name <- sub("hs_cancer_types_", "", cancer_type)
     code <- disease_frequencies %>%
       filter(Disease.Name == cancer_name) %>%
       pull(Numerical.Codes)
@@ -62,76 +62,59 @@ clean_disease_name <- function(name) {
 
 # Function to calculate jacobian matrix for logistic regression
 calculate_jacobian <- function(predictors, coefficients) {
-  # Convert inputs to appropriate formats
-  predictors <- as.matrix(predictors) 
-  coefficients <- as.numeric(coefficients) 
-  # Add intercept column to predictors
-  predictors_with_intercept <- cbind(1, predictors) 
-  linear_predictor <- predictors_with_intercept %*% coefficients 
-  # Calculate derivative of inverse logit function
-  deriv <- as.vector(exp(-linear_predictor) / (1 + exp(-linear_predictor))^2) 
-  jacobian <- matrix(deriv, nrow = 1) %*% predictors_with_intercept / nrow(predictors)   
+  predictors <- as.matrix(predictors)
+  coefficients <- as.numeric(coefficients)
+  predictors_with_intercept <- cbind(1, predictors)
+  linear_predictor <- predictors_with_intercept %*% coefficients
+  deriv <- as.vector(exp(-linear_predictor) / (1 + exp(-linear_predictor))^2)
+  jacobian <- matrix(deriv, nrow = 1) %*% predictors_with_intercept / nrow(predictors)
   return(jacobian)
 }
 
 # Function to calculate individual variances for each prediction
 calculate_delta_variance <- function(predictors, coefficients, vcov_matrix) {
-  # Convert inputs to appropriate formats
   predictors <- as.matrix(predictors)
-  coefficients <- as.numeric(coefficients)
-  vcov_matrix <- as.matrix(vcov_matrix)
-  # Add intercept column
   predictors_with_intercept <- cbind(1, predictors)
-  # Calculate linear predictor
   linear_predictor <- predictors_with_intercept %*% coefficients
-  # Calculate derivative for each observation
   deriv <- exp(-linear_predictor) / (1 + exp(-linear_predictor))^2
-  # Calculate individual variances
-  variances <- sapply(1:nrow(predictors), function(i) {
-    # Calculate jacobian for this observation
-    jacobian <- matrix(deriv[i] * predictors_with_intercept[i,], nrow = 1)
-    # Calculate variance for this observation
-    var <- jacobian %*% vcov_matrix %*% t(jacobian)
-    return(as.numeric(var))
-  })
+  
+  # Vectorized calculation
+  jacobians <- t(deriv * t(predictors_with_intercept))
+  variances <- diag(jacobians %*% vcov_matrix %*% t(jacobians))
+  
   return(variances)
 }
 
 # Create standardized disease lookup table
 disease_lookup <- disease_frequencies %>%
   mutate(
-    condition_code = paste0("condition_", Numerical.Codes),
-    cancer_code = case_when(
-      Disease.Category == "Cancer" ~ paste0("hs_cancer_types_", tolower(gsub(" ", "_", Disease.Name))),
-      TRUE ~ NA_character_
-    ),
-    code = coalesce(cancer_code, condition_code)
+    code = case_when(
+      Disease.Category == "Cancer" ~ paste0("hs_cancer_types_", Disease.Name),
+      TRUE ~ paste0("condition_", Numerical.Codes)
+    )
   ) %>%
   dplyr::select(code, Disease.Name)
-```
 
-```{r LRM for each disease}
-# Function to fit logistic regression and return coefficients and p-values
+# Fit logistic regression models
 fit_logistic <- function(response, predictors) {
   model <- glm(response ~ ., data = predictors, family = binomial(link = "logit"))
   coef_summary <- summary(model)$coefficients
-  result <- data.frame(
+  tibble(
     Term = rownames(coef_summary),
     Coefficient = coef_summary[, "Estimate"],
     P_value = coef_summary[, "Pr(>|z|)"]
   )
-  return(result)
 }
+```
 
-# Fit models and combine results
-model_results <- map(responses, ~fit_logistic(.x, predictors))
-coef_pvalue_df <- do.call(rbind, lapply(names(model_results), function(disease) {
-  df <- model_results[[disease]]
-  df$Disease <- disease
-  return(df)
-}))
+```{r LRM for each disease}
+# Fit models
+model_results <- future_map(responses, ~fit_logistic(.x, predictors))
 
-# Create wide format dataframe with coefficients and p-values
+# Combine and format results
+coef_pvalue_df <- bind_rows(
+  imap(model_results, ~mutate(.x, Disease = .y))
+)
 coef_pvalue_wide <- coef_pvalue_df %>%
   pivot_wider(
     id_cols = Disease,
@@ -139,15 +122,6 @@ coef_pvalue_wide <- coef_pvalue_df %>%
     values_from = c(Coefficient, P_value),
     names_glue = "{Term}_{.value}"
   )
-
-# Reorder columns
-col_order <- c("Disease",
-               paste0("(Intercept)_", c("Coefficient", "P_value")),
-               paste0(colnames(predictors), "_Coefficient"),
-               paste0(colnames(predictors), "_P_value"))
-coef_pvalue_wide <- coef_pvalue_wide[, col_order]
-
-# Add disease names and save results
 coef_pvalue_wide_named <- coef_pvalue_wide %>%
   left_join(disease_lookup, by = c("Disease" = "code")) %>%
   relocate(Disease.Name, .after = Disease)
@@ -156,7 +130,7 @@ write.csv(coef_pvalue_wide_named,
           "./undirected network/disease_coefficients_and_pvalues_all.csv", 
           row.names = FALSE)
 
-# Extract coefficients for further analysis
+# Extract coefficients
 coef_df <- coef_pvalue_wide %>%
   dplyr::select(Disease, ends_with("_Coefficient")) %>%
   rename_with(~str_remove(., "_Coefficient"), ends_with("_Coefficient"))
