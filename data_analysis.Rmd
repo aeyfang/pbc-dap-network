@@ -19,8 +19,8 @@ plan(multisession)
 
 ```{r setup}
 # Import and prepare data
-data <- read.csv("./clean data/cleaned_all.csv")
-disease_frequencies <- read.csv("./frequency tables/disease_frequencies_all.csv")
+data <- read.csv("./clean data/cleaned_strata_senior.csv")
+disease_frequencies <- read.csv("./frequency tables/disease_frequencies_senior.csv")
 
 # Sort data by unique identifier
 data <- data %>% arrange(dog_id)
@@ -55,7 +55,10 @@ clean_disease_name <- function(name) {
   if(startsWith(name, "condition_")) {
     return(sub("^condition_", "", name))
   } else if(startsWith(name, "hs_cancer_types_")) {
-    return(get_cancer_code(name))
+    code <- disease_frequencies %>%
+      filter(Code.from.DAP.data == name) %>%
+      pull(Numerical.Codes)
+    return(if(length(code) == 0) name else as.character(code))
   }
   return(name)
 }
@@ -71,16 +74,25 @@ calculate_jacobian <- function(predictors, coefficients) {
   return(jacobian)
 }
 
-# Function to calculate individual variances for each prediction
 calculate_delta_variance <- function(predictors, coefficients, vcov_matrix) {
+  # Convert inputs to appropriate formats
   predictors <- as.matrix(predictors)
+  coefficients <- as.numeric(coefficients)
+  vcov_matrix <- as.matrix(vcov_matrix)
+  # Add intercept column
   predictors_with_intercept <- cbind(1, predictors)
+  # Calculate linear predictor
   linear_predictor <- predictors_with_intercept %*% coefficients
+  # Calculate derivative for each observation
   deriv <- exp(-linear_predictor) / (1 + exp(-linear_predictor))^2
-  
-  # Vectorized calculation
-  jacobians <- t(deriv * t(predictors_with_intercept))
-  variances <- diag(jacobians %*% vcov_matrix %*% t(jacobians))
+  # Calculate individual variances
+  variances <- sapply(1:nrow(predictors), function(i) {
+    # Calculate jacobian for this observation
+    jacobian <- matrix(deriv[i] * predictors_with_intercept[i,], nrow = 1)
+    # Calculate variance for this observation
+    var <- jacobian %*% vcov_matrix %*% t(jacobian)
+    return(as.numeric(var))
+  })
   
   return(variances)
 }
@@ -127,7 +139,7 @@ coef_pvalue_wide_named <- coef_pvalue_wide %>%
   relocate(Disease.Name, .after = Disease)
 
 write.csv(coef_pvalue_wide_named, 
-          "./undirected network/disease_coefficients_and_pvalues_all.csv", 
+          "./model coefficients/coef_and_pvalues_senior.csv", 
           row.names = FALSE)
 
 # Extract coefficients
@@ -140,32 +152,25 @@ coef_df_named <- coef_df %>%
   relocate(Disease.Name, .after = Disease)
 
 write.csv(coef_df_named, 
-          "./undirected network/disease_coefficients_only_all.csv", 
+          "./model coefficients/coef_only_senior.csv", 
           row.names = FALSE)
 ```
 
 ```{r calculate individual probabilities}
-# Calculate risks and variances for all diseases
-risk_scores <- map(names(responses), function(disease) {
-  # Get response
+# Calculate risks and variances
+risk_scores <- future_map(names(responses), function(disease) {
   response <- responses[[disease]]
-  
-  # Fit logistic regression
   model <- glm(response ~ ., data = predictors, family = binomial(link = "logit"))
   
-  # Calculate probabilities
   linear_pred <- predict(model, type = "link")
   probabilities <- 1 / (1 + exp(-linear_pred))
   
-  # Get actual count for normalization
   actual_count <- sum(response)
-  # Normalize probabilities
   scaling_factor <- actual_count / sum(probabilities)
   normalized_probs <- probabilities * scaling_factor
   
-  # Calculate individual variances using delta method
-  initial_variances <- calculate_delta_variance(predictors, coef(model), vcov(model))
-  adjusted_variances <- initial_variances * scaling_factor^2
+  variances <- calculate_delta_variance(predictors, coef(model), vcov(model))
+  adjusted_variances <- variances * scaling_factor^2
   
   list(
     probabilities = normalized_probs,
@@ -173,22 +178,23 @@ risk_scores <- map(names(responses), function(disease) {
   )
 })
 
-# Extract probabilities and variances
-risk_scores_df <- map(risk_scores, "probabilities") %>% 
+# Extract probabilities and variances using dplyr
+risk_scores_df <- map(risk_scores, "probabilities") %>%
   bind_cols() %>%
   setNames(names(responses))
 
-variance_df <- map(risk_scores, "variance") %>% 
+variance_df <- map(risk_scores, "variance") %>%
   bind_cols() %>%
   setNames(names(responses))
 
 # Save results
 write.csv(risk_scores_df, 
-          "./undirected network/personalized_probability_all.csv", 
+          "./individual stats/probability_senior.csv", 
           row.names = FALSE)
 write.csv(variance_df, 
-          "./undirected network/personalized_probability_with_variance_all.csv", 
+          "./individual stats/probability_variance_senior.csv", 
           row.names = FALSE)
+
 ```
 
 
@@ -239,32 +245,30 @@ network_df <- do.call(rbind, network_attributes) %>%
 network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "bonferroni")
 
 # Save all pairs with variances
-write.csv(network_df, "./summary statistics/all_pairs_variances.csv")
+write.csv(network_df, "./pair stats/all_pairs_variances_senior.csv")
 
 # Filter significant pairs
 significant_pairs <- network_df %>% 
   filter(AdjustedPValue < 0.001) %>%
   arrange(AdjustedPValue)
 
-# Format significant pairs for Cytoscape
 formatted_significant_pairs <- significant_pairs %>%
-  mutate(
-    Disease1 = sapply(Disease1, clean_disease_name),
-    Disease2 = sapply(Disease2, clean_disease_name)
-  ) %>%
-  dplyr::select(Disease1, Disease2)
+  transmute(
+    Disease1 = map_chr(Disease1, clean_disease_name),
+    Disease2 = map_chr(Disease2, clean_disease_name)
+  )
 
 # Save results
 write.csv(significant_pairs, 
-          "./CSV network edges/significant_pairs_all.csv", 
+          "./pair stats/significant_pairs_senior.csv", 
           row.names = FALSE)
 write_xlsx(formatted_significant_pairs, 
-           "./network edges/formatted_pairs_all.xlsx")
+           "./Cytoscape inputs/formatted_pairs_senior.xlsx")
 ```
 
 ```{r reference tables}
 # Create final reference table with p-values
-lookup_table <- formatted_significant_pairs %>%
+reference_table <- formatted_significant_pairs %>%
   mutate(
     Disease1 = as.character(Disease1),
     Disease2 = as.character(Disease2)
@@ -273,22 +277,22 @@ lookup_table <- formatted_significant_pairs %>%
   left_join(
     disease_frequencies %>%
       mutate(code = as.character(Numerical.Codes)) %>%
-      dplyr::select(code, Disease.Name),  # Explicitly use dplyr::select
+      dplyr::select(code, Disease.Name),  
     by = c("Disease1" = "code")
   ) %>%
   rename(Disease1_name = Disease.Name) %>%
   left_join(
     disease_frequencies %>%
       mutate(code = as.character(Numerical.Codes)) %>%
-      dplyr::select(code, Disease.Name),  # Explicitly use dplyr::select
+      dplyr::select(code, Disease.Name),
     by = c("Disease2" = "code")
   ) %>%
   rename(Disease2_name = Disease.Name) %>%
   dplyr::select(Disease1, Disease1_name, Disease2, Disease2_name) %>%  # Explicitly use dplyr::select
   cbind(pval = significant_pairs$AdjustedPValue)
 
-write.csv(lookup_table, 
-          "./lookup tables/lookup_all.csv", 
+write.csv(reference_table, 
+          "./reference tables/reference_senior.csv", 
           row.names = FALSE)
 
 # Create comprehensive table with all statistics
@@ -322,7 +326,7 @@ comprehensive_table <- network_df %>%
   arrange(AdjustedPValue)
 
 write.csv(comprehensive_table, 
-          "./CSV network edges/comprehensive_disease_pairs_all.csv", 
+          "./pair stats/comprehensive_pairs_senior.csv", 
           row.names = FALSE)
 ```
 

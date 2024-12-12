@@ -6,11 +6,9 @@ output: html_document
 ---
 
 ```{r packages}
-library(dplyr)
-library(stringr)
+library(tidyverse)
 library(fastDummies)
 library(miceadds)
-library(tidyverse)
 library(haven)
 ```
 
@@ -156,7 +154,7 @@ clean_data <- function(data) {
 }
 
 # This will include dogs with no diseases
-write.csv(merged_data, "./clean data/merged_data_with_no_diseases.csv", row.names = FALSE)
+write.csv(merged_data, "./clean data/merged_data_with_healthy_dogs.csv", row.names = FALSE)
 
 # Apply criteria to original dataset
 merged_data_cleaned <- clean_data(merged_data)
@@ -165,7 +163,7 @@ merged_data_cleaned <- clean_data(merged_data)
 lifestage_strata_cleaned <- lapply(lifestage_strata, clean_data)
 
 # Write the cleaned original dataset to CSV
-write.csv(merged_data_cleaned, "./clean data/cleaned_all.csv", row.names = FALSE)
+write.csv(merged_data_cleaned, "./clean data/cleaned_unstrat.csv", row.names = FALSE)
 
 # Write each cleaned stratum to a separate CSV file
 walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned, 
@@ -193,7 +191,7 @@ generate_frequency_table <- function(data, suffix = "") {
 }
 
 # Generate frequency table for overall dataset
-overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_all")
+overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
 
 # Generate frequency tables for each stratum
 strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
