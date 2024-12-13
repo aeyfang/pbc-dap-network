@@ -10,7 +10,6 @@ output: html_document
 library(tidyverse)
 library(caret)
 library(writexl)
-library(dplyr)
 library(furrr)
 
 # Set up parallel processing
@@ -19,8 +18,8 @@ plan(multisession)
 
 ```{r setup}
 # Import and prepare data
-data <- read.csv("./clean data/cleaned_strata_senior.csv")
-disease_frequencies <- read.csv("./frequency tables/disease_frequencies_senior.csv")
+data <- read.csv("./clean data/cleaned_unstrat.csv")
+disease_frequencies <- read.csv("./frequency tables/disease_frequencies_unstrat.csv")
 
 # Sort data by unique identifier
 data <- data %>% arrange(dog_id)
@@ -69,9 +68,9 @@ calculate_jacobian <- function(predictors, coefficients) {
   coefficients <- as.numeric(coefficients)
   predictors_with_intercept <- cbind(1, predictors)
   linear_predictor <- predictors_with_intercept %*% coefficients
-  deriv <- as.vector(exp(-linear_predictor) / (1 + exp(-linear_predictor))^2)
-  jacobian <- matrix(deriv, nrow = 1) %*% predictors_with_intercept / nrow(predictors)
-  return(jacobian)
+  deriv <- exp(-linear_predictor) / (1 + exp(-linear_predictor))^2
+  jacobian <- deriv * predictors_with_intercept 
+  return(jacobian)  # Returns individual-level Jacobians
 }
 
 calculate_delta_variance <- function(predictors, coefficients, vcov_matrix) {
@@ -139,7 +138,7 @@ coef_pvalue_wide_named <- coef_pvalue_wide %>%
   relocate(Disease.Name, .after = Disease)
 
 write.csv(coef_pvalue_wide_named, 
-          "./model coefficients/coef_and_pvalues_senior.csv", 
+          "./model coefficients/coef_and_pvalues_unstrat.csv", 
           row.names = FALSE)
 
 # Extract coefficients
@@ -152,7 +151,7 @@ coef_df_named <- coef_df %>%
   relocate(Disease.Name, .after = Disease)
 
 write.csv(coef_df_named, 
-          "./model coefficients/coef_only_senior.csv", 
+          "./model coefficients/coef_only_unstrat.csv", 
           row.names = FALSE)
 ```
 
@@ -189,10 +188,10 @@ variance_df <- map(risk_scores, "variance") %>%
 
 # Save results
 write.csv(risk_scores_df, 
-          "./individual stats/probability_senior.csv", 
+          "./individual stats/probability_unstrat.csv", 
           row.names = FALSE)
 write.csv(variance_df, 
-          "./individual stats/probability_variance_senior.csv", 
+          "./individual stats/probability_variance_unstrat.csv", 
           row.names = FALSE)
 
 ```
@@ -245,7 +244,7 @@ network_df <- do.call(rbind, network_attributes) %>%
 network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "bonferroni")
 
 # Save all pairs with variances
-write.csv(network_df, "./pair stats/all_pairs_variances_senior.csv")
+write.csv(network_df, "./pair stats/all_pairs_variances_unstrat.csv")
 
 # Filter significant pairs
 significant_pairs <- network_df %>% 
@@ -260,10 +259,10 @@ formatted_significant_pairs <- significant_pairs %>%
 
 # Save results
 write.csv(significant_pairs, 
-          "./pair stats/significant_pairs_senior.csv", 
+          "./pair stats/significant_pairs_unstrat.csv", 
           row.names = FALSE)
 write_xlsx(formatted_significant_pairs, 
-           "./Cytoscape inputs/formatted_pairs_senior.xlsx")
+           "./Cytoscape inputs/formatted_pairs_unstrat.xlsx")
 ```
 
 ```{r reference tables}
@@ -292,7 +291,7 @@ reference_table <- formatted_significant_pairs %>%
   cbind(pval = significant_pairs$AdjustedPValue)
 
 write.csv(reference_table, 
-          "./reference tables/reference_senior.csv", 
+          "./reference tables/reference_unstrat.csv", 
           row.names = FALSE)
 
 # Create comprehensive table with all statistics
@@ -326,9 +325,14 @@ comprehensive_table <- network_df %>%
   arrange(AdjustedPValue)
 
 write.csv(comprehensive_table, 
-          "./pair stats/comprehensive_pairs_senior.csv", 
+          "./pair stats/comprehensive_pairs_unstrat.csv", 
           row.names = FALSE)
 ```
 
+
+```{r}
+range(variance_df)
+summary(variance_df)
+```
 
 
