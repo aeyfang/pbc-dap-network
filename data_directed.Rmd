@@ -6,15 +6,12 @@ output: html_document
 ---
 
 ```{r}
-library(dplyr)
-library(tidyr)
-library(lubridate)
-library(readr)
-library(furrr)
-library(haven)
-library(readxl)
-library(writexl)
-library(ggplot2)
+library(tidyverse)  
+library(lubridate)  
+library(furrr)      
+library(haven)      
+library(readxl)     
+library(writexl)    
 
 plan(multisession)
 ```
@@ -25,11 +22,11 @@ load("./DAP_2021_HLES_health_conditions_v1.0.RData")
 health_condition<-HLES_health_conditions
 load("./DAP_2021_HLES_dog_owner_v1.0.RData")
 dog_owner<-HLES_dog_owner
-cleaned_data<-read.csv("./clean data/cleaned_all.csv")
-personalized_probability<-read.csv("./undirected network/personalized_probability_with_variance_all.csv")
+cleaned_data<-read.csv("./clean data/cleaned_unstrat.csv")
+personalized_probability<-read.csv("./individual stats/probability_unstrat.csv")
 personalized_probability<-cbind(dog_id = cleaned_data$dog_id,personalized_probability)
-undirected_comorbid_pairs<-read_xlsx("./network edges/formatted_pairs_all.xlsx")
-disease_frequencies <- read_csv("./frequency tables/disease_frequencies_all.csv")
+undirected_comorbid_pairs<-read_xlsx("./Cytoscape inputs/formatted_pairs_unstrat.xlsx")
+disease_frequencies <- read_csv("./frequency tables/disease_frequencies_unstrat.csv")
 ```
 
 ```{r}
@@ -362,32 +359,32 @@ direct_significant_pairs <- results %>%
   arrange(adjusted_p_value)  # Sort by adjusted p-value
 
 # Save formatted network attributes
-write_xlsx(direct_significant_pairs, "./network edges/direct_significant_pairs_01.xlsx")
+write_xlsx(direct_significant_pairs, "./Cytoscape inputs/formatted_pairs_directed.xlsx")
 
 # First let's check the actual column names
 names(disease_frequencies)  
 
 # Create a lookup table for disease names 
-disease_lookup <- disease_frequencies %>%
+disease_reference <- disease_frequencies %>%
   dplyr::select(Code = `Numerical.Codes`, Disease.Name = `Disease.Name`) %>%
   mutate(Code = as.character(Code))  # Convert Code to character
 
 # Add disease names to the Cytoscape edges
-lookup_table <- direct_significant_pairs %>%
+reference_table <- direct_significant_pairs %>%
   mutate(
     source = as.character(source),  # Ensure source is character
     target = as.character(target)   # Ensure target is character
   ) %>%
-  left_join(disease_lookup, by = c("source" = "Code")) %>%
+  left_join(disease_reference, by = c("source" = "Code")) %>%
   rename(source_name = Disease.Name) %>%
-  left_join(disease_lookup, by = c("target" = "Code")) %>%
+  left_join(disease_reference, by = c("target" = "Code")) %>%
   rename(target_name = Disease.Name)
 
 # Reorder columns
-lookup_table <- lookup_table %>%
+reference_table <- reference_table %>%
   dplyr::select(source, source_name, target, target_name, p_value)
 
-write.csv(lookup_table, "./lookup tables/lookup_direct.csv", row.names = FALSE)
+write.csv(reference_table, "./reference tables/reference_direct.csv", row.names = FALSE)
 
 # Create comprehensive results with one row per direction
 comprehensive_results <- results %>%
@@ -426,9 +423,9 @@ comprehensive_results <- results %>%
     )
   )} %>%
   # Add disease names
-  left_join(disease_lookup, by = c("source" = "Code")) %>%
+  left_join(disease_reference, by = c("source" = "Code")) %>%
   rename(source_name = Disease.Name) %>%
-  left_join(disease_lookup, by = c("target" = "Code")) %>%
+  left_join(disease_reference, by = c("target" = "Code")) %>%
   rename(target_name = Disease.Name) %>%
   # Select and arrange final columns
   dplyr::select(
@@ -446,7 +443,7 @@ comprehensive_results <- results %>%
 
 # Save the comprehensive results
 write.csv(comprehensive_results, 
-          "./CSV network edges/all_directed_edges_01.csv", 
+          "./pair stats/comprehensive_pairs_directed.csv", 
           row.names = FALSE)
 ```
 

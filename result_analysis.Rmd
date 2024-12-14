@@ -360,7 +360,7 @@ print(unique_unstrat_edges)
 
 
 
-```{r degree distribution analysis}
+```{r degree distribution}
 #power law analysis for total
 
 # Read and process node data
@@ -466,6 +466,71 @@ if(exp_vs_power$p_one_sided < 0.05) {
 }
 ```
 
+```{r network centrality measures}
+edges_format<-function(pair_table){
+  pair_table<-pair_table%>%
+    dplyr::select(Disease1, Disease2)
+  vector_edges<-c(t(pair_table))
+  return(vector_edges)
+}
+
+senior_graph<-edges_format(senior_pairs)
+senior_graph<-make_graph(edges = senior_graph, directed=F)
+senior_lcc<-largest_component(senior_graph)
+mature_adult_graph<-edges_format(mature_adult_pairs)
+mature_adult_graph<-make_graph(edges = mature_adult_graph, directed=F)
+mature_adult_lcc<-largest_component(mature_adult_graph)
+young_adult_graph<-edges_format(young_adult_pairs)
+young_adult_graph<-make_graph(edges = young_adult_graph, directed=F)
+young_adult_lcc<-largest_component(young_adult_graph)
+
+edge_densities<-c(
+  edge_density(senior_graph, loops = F),
+  edge_density(mature_adult_graph, loops = F), 
+  edge_density(young_adult_graph, loops = F),
+  edge_density(senior_lcc, loops = F),
+  edge_density(mature_adult_lcc, loops = F), 
+  edge_density(young_adult_lcc, loops = F))
+
+closeness_centralities<-c(
+  centr_clo(senior_graph, mode = c("all"), normalized = T)$centralization,
+  centr_clo(mature_adult_graph, mode = c("all"), normalized = T)$centralization,
+  centr_clo(young_adult_graph, mode = c("all"), normalized = T)$centralization,
+  centr_clo(senior_lcc, mode = c("all"), normalized = T)$centralization,
+  centr_clo(mature_adult_lcc, mode = c("all"), normalized = T)$centralization,
+  centr_clo(young_adult_lcc, mode = c("all"), normalized = T)$centralization
+)
+  
+
+betweenness_centralities<-c(
+  centr_betw(senior_graph, directed = F, normalized = T)$centralization,
+  centr_betw(mature_adult_graph, directed = F, normalized = T)$centralization,
+  centr_betw(young_adult_graph, directed = F, normalized = T)$centralization,
+  centr_betw(senior_lcc, directed = F, normalized = T)$centralization,
+  centr_betw(mature_adult_lcc, directed = F, normalized = T)$centralization,
+  centr_betw(young_adult_lcc, directed = F, normalized = T)$centralization)
+
+network_centralities<-c(
+  centr_degree(senior_graph, mode = "all", loops = F, normalized = T)$centralization,
+  centr_degree(mature_adult_graph, mode = "all", loops = F, normalized = T)$centralization,
+  centr_degree(young_adult_graph, mode = "all", loops = F, normalized = T)$centralization,
+  centr_degree(senior_lcc, mode = "all", loops = F, normalized = T)$centralization,
+  centr_degree(mature_adult_lcc, mode = "all", loops = F, normalized = T)$centralization,
+  centr_degree(young_adult_lcc, mode = "all", loops = F, normalized = T)$centralization)
+
+clustering_coefs<-c(
+  transitivity(senior_graph,type = "global"),
+  transitivity(mature_adult_graph,type = "global"),
+  transitivity(young_adult_graph,type = "global"),
+  transitivity(senior_lcc,type = "global"),
+  transitivity(mature_adult_lcc,type = "global"),
+  transitivity(young_adult_lcc,type = "global"))
+
+global_network_stats<-data.frame(edge_densities,closeness_centralities,betweenness_centralities, network_centralities, clustering_coefs)
+row.names(global_network_stats)<-c("senior_all","mature_adult_all","young_adult_all","senior_lcc","mature_adult_lcc","young_adult_lcc")
+
+print(global_network_stats)
+```
 ```{r}
 
 ```
