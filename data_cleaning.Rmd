@@ -5,38 +5,53 @@ date: "2024-07-13"
 output: html_document
 ---
 
-```{r packages}
+```{r setup}
+# Load required packages
 library(tidyverse)
 library(fastDummies)
 library(miceadds)
 library(haven)
+
+# Create necessary directories
+dir_list <- c("./clean data", "./frequency tables")
+for(dir in dir_list) {
+  if(!dir.exists(dir)) {
+    dir.create(dir, recursive = TRUE)
+    cat("Created directory:", dir, "\n")
+  }
+}
 ```
 
-```{r import files}
-#these files should be obtained from DAP project
+```{r data import}
+# Import source files from the Dog Aging Project
+# Load survey data from DAP 2021 Curated Data Release
 load.Rdata(filename="./DAP_2021_HLES_health_conditions_v1.0.RData", objname = "health_condition")
 load.Rdata(filename = "./DAP_2021_HLES_cancer_conditions_v1.0.RData", objname = "cancer_condition")
 load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dog_owner")
 
-#this file is in GitHub
+# Load crosswalk between DAP disease codes and numerical codes
+# This file is found in the GitHub repo
 disease_code<-read.csv(file = "./diseaseCodes.csv")
 ```
 
-```{r process and merge data frames}
+```{r data processing and merging}
 # Process dog_owner dataframe
+# Extract key demographic variables and convert to appropriate types
 dog_owner <- dog_owner %>%
   dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered) %>%
   mutate(
     dog_id = as.character(dog_id),
     dd_age_years = as.numeric(dd_age_years),
     dd_weight_lbs = as.numeric(dd_weight_lbs),
-    dd_breed_pure_or_mixed = dd_breed_pure_or_mixed - 1,
+    dd_breed_pure_or_mixed = dd_breed_pure_or_mixed - 1, # Convert to binary (0=purebred, 1=mixed)
+    # Create combined sex/spay-neuter status variable (1-4)
     recode.sex = case_when(
       dd_sex == 2 & dd_spayed_or_neutered == "False" ~ 1, #female, unspayed
       dd_sex == 2 & dd_spayed_or_neutered == "True" ~ 2, #female, spayed
       dd_sex == 1 & dd_spayed_or_neutered == "False" ~ 3, #male, unneutered
       dd_sex == 1 & dd_spayed_or_neutered == "True" ~ 4 # male, neutered
     ),
+    # Convert weight to kg and classify dogs by weight class
     weight_kg = dd_weight_lbs * 0.453592,  # Convert lbs to kg
     weight_class = case_when(
       weight_kg < 10 ~ "toy/small",
@@ -45,6 +60,8 @@ dog_owner <- dog_owner %>%
       weight_kg < 40 ~ "large",
       TRUE ~ "giant"
     ),
+    # Assign life stage based on age and weight class per DAP guidelines
+    # Different weight classes age at different rates
     lifestage = case_when(
       (weight_class %in% c("toy/small", "medium", "standard") & dd_age_years <= 0.75) |
       (weight_class == "large" & dd_age_years <= 1) |
@@ -64,9 +81,13 @@ dog_owner <- dog_owner %>%
     )
   ) %>%
   dplyr::select(-dd_sex, -dd_spayed_or_neutered) %>% #remove original spay/neuter and sex columns
-  dummy_cols(select_columns = "recode.sex", remove_first_dummy = TRUE)
+  dummy_cols(select_columns = "recode.sex", remove_first_dummy = TRUE) # Create dummy variables for regression
 
-# For cancer_condition dataframe
+```
+
+```{r cancer condition processing}
+# Process cancer_condition dataframe
+# Filter out non-cancerous conditions that were incorrectly reported as cancer
 cancer_condition <- cancer_condition %>%
   filter(!str_detect(tolower(hs_cancer_types_other_description), 
                      "benign|not cancer|no cancer|non cancerous|non-cancerous|fatty tumor|non malignant|non-malignant|not malignant|not known|don't know|unknown|not|non|no") |
@@ -76,7 +97,7 @@ cancer_condition <- cancer_condition %>%
   dplyr::select(-hs_cancer_types_other_description) %>%
   mutate(dog_id = as.character(dog_id))
 
-# Convert "true" to 1 and "false" to 0 for all hs_cancer_types columns
+# Standardize cancer type variables to binary format (0/1)
 cancer_condition <- cancer_condition %>%
   mutate(across(starts_with("hs_cancer_types"), 
                 ~case_when(
@@ -86,27 +107,31 @@ cancer_condition <- cancer_condition %>%
                   TRUE ~ NA_real_
                 )))
 
-# Convert labelled columns to numeric
+# Ensure all cancer type columns are numeric
 cancer_condition <- cancer_condition %>%
   mutate(across(starts_with("hs_cancer_types"), 
                 ~as.numeric(as.character(.))))
+```
 
-# For health_condition dataframe
+```{r health condition processing}
+# Transform health_condition data from long to wide format for analysis
+# Each row will represent one dog with binary indicators for each condition
 health_condition_wide <- health_condition %>%
   filter(!is.na(hs_condition)) %>%
   dplyr::select(dog_id, hs_condition) %>%
   distinct() %>%
-  mutate(present = 1,
+  mutate(present = 1,  # Create binary indicator (1 = condition present)
          dog_id = as.character(dog_id)) %>% 
   pivot_wider(
     id_cols = dog_id,
     names_from = hs_condition,
     names_prefix = "condition_",
     values_from = present,
-    values_fill = 0
+    values_fill = 0  # Fill missing values with 0 (condition not present)
   ) %>%
   mutate(across(everything(), ~replace_na(., 0))) %>%
   {
+    # Ensure condition columns are in numerical order
     condition_cols <- grep("^condition_", names(.), value = TRUE)
     sorted_condition_cols <- sort(as.numeric(sub("^condition_", "", condition_cols)))
     sorted_condition_cols <- paste0("condition_", sorted_condition_cols)
@@ -114,24 +139,31 @@ health_condition_wide <- health_condition %>%
     dplyr::select(., dog_id, all_of(sorted_condition_cols), everything())
   }
 
-# Merge datasets
+```
+
+```{r merge and straatify data}
+# Combine dog demographics, cancer conditions, and health conditions
 merged_data <- dog_owner %>%
   left_join(cancer_condition, by = "dog_id") %>%
   left_join(health_condition_wide, by = "dog_id")
 
-# After replacing NA values with 0
+# Replace any remaining NA values with 0 for disease indicators
 merged_data <- merged_data %>%
   mutate(across(everything(), ~replace_na(., 0)))
 
-# Stratify data by lifestage
+# Split data into age cohorts for stratified analysis
 lifestage_strata <- merged_data %>%
   group_by(lifestage) %>%
   group_split()
 
-# Name each stratum
+# Name each stratum for easier reference
 names(lifestage_strata) <- c("mature_adult", "puppy", "senior", "young_adult")
+```
 
-# Function to apply criteria and clean data
+```{r data cleaning function}
+# Function to filter data based on study inclusion criteria
+# 1. Keep only conditions with >=60 affected dogs
+# 2. Include only dogs with at least one condition
 clean_data <- function(data) {
   # Identify columns with more than 60 dogs
   disease_columns <- data %>%
@@ -152,14 +184,16 @@ clean_data <- function(data) {
   
   return(data)
 }
+```
 
-# This will include dogs with no diseases
+```{r apply study criteria and save data}
+# Save full dataset including dogs with no diseases
 write.csv(merged_data, "./clean data/merged_data_with_healthy_dogs.csv", row.names = FALSE)
 
-# Apply criteria to original dataset
+# Apply filtering criteria to original dataset
 merged_data_cleaned <- clean_data(merged_data)
 
-# Apply criteria to each stratum
+# Apply criteria to each lifestage stratum
 lifestage_strata_cleaned <- lapply(lifestage_strata, clean_data)
 
 # Write the cleaned original dataset to CSV
@@ -171,20 +205,23 @@ walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned,
 ```
 
 
-```{r generate disease frequency table}
-# Function to generate disease frequency table
+```{r generate disease frequency tables}
+# Function to create frequency counts for all diseases in dataset
 generate_frequency_table <- function(data, suffix = "") {
+  # Count occurrences of each disease
   raw_disease_counts <- data %>%
     select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
     summarise(across(everything(), sum)) %>%
     pivot_longer(everything(), names_to = "code", values_to = "frequency") %>%
     mutate(code = str_remove(code, "condition_"))
   
+  # Join with disease code lookup table to get disease names and categories
   disease_frequencies <- disease_code %>%
     inner_join(raw_disease_counts, by = c("Code.from.DAP.data" = "code")) %>%
     select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency') %>%
     arrange(desc(frequency))
   
+  # Save frequency table to CSV
   write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
   
   return(disease_frequencies)
@@ -193,7 +230,7 @@ generate_frequency_table <- function(data, suffix = "") {
 # Generate frequency table for overall dataset
 overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
 
-# Generate frequency tables for each stratum
+# Generate frequency tables for each lifestage stratum
 strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
                            ~generate_frequency_table(.x, paste0("_", .y)))
 ```

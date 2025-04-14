@@ -14,50 +14,89 @@ library(stats)
 library(cowplot)
 ```
 
-```{r import data}
-cleaned_without_healthy_dogs<-read.csv(file = "./clean data/cleaned_unstrat.csv")
-cleaned_with_healthy_dogs<-read.csv(file="./clean data/merged_data_with_healthy_dogs.csv")
-disease_frequencies<-read.csv(file = "./frequency tables/disease_frequencies_unstrat.csv")
+```{r setup}
+# Load required packages
+library(tidyverse)  # For data manipulation and visualization
+library(gt)         # For creating formatted tables
+library(gtsummary)  # For summary tables
+library(webshot2)   # For saving tables as images
+library(stats)      # For statistical operations
+library(cowplot)    # For combining plots
+
+# Create necessary output directories if they don't exist
+dir.create("./summary statistics", showWarnings = FALSE, recursive = TRUE)
+dir.create("./supplementary figures", showWarnings = FALSE, recursive = TRUE)
 ```
 
+```{r import and prep}
+# Import cleaned data files
+# - cleaned_without_healthy_dogs: dogs with at least one disease condition
+# - cleaned_with_healthy_dogs: all dogs, including those with no reported disease
+# - disease_frequencies: table of disease occurrences
+
+cleaned_without_healthy_dogs <- read.csv(file = "./clean data/cleaned_unstrat.csv")
+cleaned_with_healthy_dogs <- read.csv(file = "./clean data/merged_data_with_healthy_dogs.csv")
+disease_frequencies <- read.csv(file = "./frequency tables/disease_frequencies_unstrat.csv")
+
+# Check if data was loaded successfully
+if(nrow(cleaned_without_healthy_dogs) == 0 || nrow(disease_frequencies) == 0) {
+  stop("Failed to load required data files or files are empty")
+}
+
+# Display basic dataset dimensions
+cat("Dataset dimensions:", 
+    "\nDogs with conditions:", nrow(cleaned_without_healthy_dogs),
+    "\nTotal disease types:", ncol(cleaned_without_healthy_dogs) - 
+      sum(!grepl("^(condition_|hs_cancer_types_)", names(cleaned_without_healthy_dogs))),
+    "\n")
+```
+
+
 ```{r age and weight histograms}
+# Create histograms of dog age and weight to understand the sample demographics
+
 # Age Distribution Histogram
 age_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = dd_age_years)) +
-  geom_histogram(binwidth = 2, color = "#F4F4F4", fill = "#1B365D")+
+  geom_histogram(binwidth = 2, color = "#F4F4F4", fill = "#1B365D") +
   xlab("Age (years)") +
   ylab("Frequency") +
   theme_minimal()
 
 print(age_histogram)
 
+# Save age histogram
 ggsave("./summary statistics/age_distribution.png", age_histogram, 
        width = 10, height = 8, dpi = 600)
 
 # Weight Distribution Histogram
 weight_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = dd_weight_lbs)) +
-  geom_histogram(binwidth = 15, color = "#F4F4F4", fill = "#00ABC8")  +
+  geom_histogram(binwidth = 15, color = "#F4F4F4", fill = "#00ABC8") +
   xlab("Weight (lbs)") +
   ylab("Frequency") +
   theme_minimal()
 
 print(weight_histogram)
 
+# Save weight histogram
 ggsave("./summary statistics/weight_distribution.png", weight_histogram, 
        width = 10, height = 8, dpi = 600)
-
 ```
 
-```{r table 1}
-# Create the table
+```{r demographic information}
+# Create a table with key demographic information
+# This table summarizes sex, breed, age, and weight distributions
+
 table1 <- cleaned_without_healthy_dogs %>%
   select(recode.sex_2, recode.sex_3, recode.sex_4, dd_breed_pure_or_mixed, dd_age_years, dd_weight_lbs) %>%
   mutate(
+    # Create readable sex categories based on the coded values
     sex = case_when(
       recode.sex_2 == 1 ~ "Female, spayed",
       recode.sex_3 == 1 ~ "Male, unneutered",
       recode.sex_4 == 1 ~ "Male, neutered",
       TRUE ~ "Female, unspayed"
     ),
+    # Create readable breed categories
     breed = ifelse(dd_breed_pure_or_mixed == 0, "Purebred", "Mixed breed")
   ) %>%
   select(sex, breed, dd_age_years, dd_weight_lbs) %>%
@@ -83,7 +122,7 @@ table1 <- cleaned_without_healthy_dogs %>%
     ~.x %>%
       mutate(stat_0 = if_else(
         variable == "sex" & label == "Female, spayed",
-        gsub("47%", "46%", stat_0), #hard coded to address rounding error
+        gsub("47%", "46%", stat_0), # Correct rounding error
         stat_0
       ))
   )
@@ -91,30 +130,27 @@ table1 <- cleaned_without_healthy_dogs %>%
 # Display the table
 print(table1)
 
-# Convert to gt object
-table1_gt <- table1 %>% as_gt()
-# Save the table
-gtsave(
-  table1_gt, 
-  filename = "./summary statistics/table1_descriptive_stats.png",
-  expand = 2
-)
+# Save table for reference
+write.csv(as_tibble(table1), "./summary statistics/table1_descriptive_stats.csv", row.names = FALSE)
 ```
 
-```{r histogram of disease categories}
-# Prepare the data
+```{r disease category analysis}
+# Analyze disease categories to understand their distribution in the study cohort
+
+# Summarize disease categories by frequency
 disease_category_summary <- disease_frequencies %>%
   group_by(Disease.Category) %>%
   summarise(Total_Frequency = sum(frequency)) %>%
   arrange(desc(Total_Frequency))
 
-# Create the bar plot
-disease_category_plot <- ggplot(disease_category_summary, aes(x = reorder(Disease.Category, -Total_Frequency), y = Total_Frequency)) +
+# Create bar plot of disease categories
+disease_category_plot <- ggplot(disease_category_summary, 
+                               aes(x = reorder(Disease.Category, -Total_Frequency), 
+                                   y = Total_Frequency)) +
   geom_bar(stat = "identity", fill = "#1B365D", color = "#F4F4F4") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(
-       x = "Disease Category",
+  labs(x = "Disease Category",
        y = "Total Frequency") +
   scale_y_continuous(labels = scales::comma)
 
@@ -129,19 +165,19 @@ ggsave("./summary statistics/disease_category_distribution.png",
        dpi = 600)
 ```
 
-```{r histogram of top 20 diseases}
-# Prepare the data
+```{r top 20 common diseases}
+# Prepare data for the top 20 most frequent diseases
 top_20_diseases <- disease_frequencies %>%
   arrange(desc(frequency)) %>%
   top_n(20, frequency)
 
-# Create the bar plot
-top_20_diseases_plot <- ggplot(top_20_diseases, aes(x = reorder(Disease.Name, frequency), y = frequency)) +
+# Create horizontal bar plot of top 20 diseases
+top_20_diseases_plot <- ggplot(top_20_diseases, 
+                              aes(x = reorder(Disease.Name, frequency), y = frequency)) +
   geom_bar(stat = "identity", fill = "#1B365D", color = "#F4F4F4") +
-  coord_flip() +  # Flip coordinates to make it a horizontal bar plot
+  coord_flip() +  # Create horizontal bars for better readability of disease names
   theme_minimal() +
-  labs(
-       x = "Disease",
+  labs(x = "Disease",
        y = "Frequency") +
   scale_y_continuous(labels = scales::comma) +
   theme(
@@ -161,8 +197,10 @@ ggsave("./summary statistics/top_20_diseases_distribution.png",
        dpi = 600)
 ```
 
-```{r plot individual disease totals}
-# Histogram
+```{r distribution of disease count per dog}
+# Analyze and visualize how many diseases each dog has in the cohort
+
+# Create histogram of disease counts per dog
 total_diseases_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = total_diseases)) +
   geom_histogram(binwidth = 1, color = "#F4F4F4", fill = "#1B365D") +
   theme_minimal() +
@@ -185,27 +223,33 @@ ggsave("./summary statistics/total_diseases_distribution.png",
        height = 6, 
        dpi = 600)
 
-# Arrange plots vertically
-combined_plot <- plot_grid(total_diseases_histogram, top_20_diseases_plot, 
-                          ncol = 1,    # stack vertically
-                          rel_heights = c(1, 1))  # equal heights)
+# Combine disease count and top 20 diseases plots for Supplementary Figure 1
+combined_plot <- plot_grid(
+  total_diseases_histogram, 
+  top_20_diseases_plot, 
+  ncol = 1,    # Stack vertically
+  rel_heights = c(1, 1)  # Equal heights
+)
 
-# Save with appropriate height:width ratio
-# Since it's stacked vertically, make height about 2x the width
+# Save the combined plot as a supplementary figure
 ggsave("./supplementary figures/S1_Fig.tiff", 
        combined_plot,
-       width = 8,      # in inches
-       height = 10,    # in inches
+       width = 8,      
+       height = 10,    
        dpi = 600, 
        compression = 'lzw')
 
 ```
 
 
-```{r}
+```{r breed specific disease analysis}
+# Analyze disease prevalence by breed background (purebred vs. mixed breed)
+# This code prepares a dataset for odds ratio analysis to compare disease rates
+
 # Create combined IVDD column and prepare dataset for analysis
 diseases_data <- cleaned_with_healthy_dogs %>%
   mutate(
+    # Create factors and combined variables
     purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
     ivdd_combined = as.numeric(condition_1111 > 0 | condition_1210 > 0),
     age = as.numeric(dd_age_years),
@@ -215,7 +259,8 @@ diseases_data <- cleaned_with_healthy_dogs %>%
     sex_4 = as.numeric(recode.sex_4)
   )
 
-# Updated list of diseases to analyze
+# Define list of diseases to analyze
+# This includes both specific diseases of interest and additional conditions from literature
 diseases <- c(
     # Original diseases from first analysis
     "hs_cancer_types_mast_cell_tumor",
@@ -233,7 +278,7 @@ diseases <- c(
     "condition_1305", # Hyperadrenocorticism
     "condition_511",  # Cardiomyopathy
     
-    # Additional diseases from Belanger et al.
+    # Additional diseases from literature
     "condition_202",  # Ear infection
     "condition_916",  # UTI
     "condition_109",  # Corneal ulcer
@@ -279,11 +324,10 @@ diseases <- c(
     "condition_1805", # Fractured bone (other)
     "condition_414",  # Lick granuloma
     "condition_908",  # Chronic kidney disease
-    "condition_612",   # Tracheal collapse
-    "condition_426"
+    "condition_612"   # Tracheal collapse
 )
 
-# Create empty lists to store results
+# Create empty lists to store model results
 models <- list()
 results <- data.frame(
   Disease = character(),
@@ -296,9 +340,9 @@ results <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# Run models for each disease
+# Run logistic regression models for each disease to compare purebred vs mixed breed
 for(disease in diseases) {
-  # Fit model
+  # Fit model with breed as predictor, controlling for other variables
   formula <- as.formula(paste(disease, "~ purebred + age + weight + sex_2 + sex_3 + sex_4"))
   model <- glm(formula, family = binomial(link = "logit"), data = diseases_data)
   
@@ -322,10 +366,10 @@ for(disease in diseases) {
   ))
 }
 
-# Apply Benjamini-Hochberg correction
+# Apply Benjamini-Hochberg correction for multiple comparisons
 results$P_Adjusted <- p.adjust(results$P_Value, method = "BH")
 
-# Add disease prevalence
+# Add disease prevalence by breed type
 results <- results %>%
   mutate(
     Prevalence_Mixed = sapply(Disease, function(d) {
@@ -397,10 +441,10 @@ disease_names <- c(
    "Fractured Bone (Other)" = "condition_1805",
    "Lick Granuloma" = "condition_414",
    "Chronic Kidney Disease" = "condition_908",
-   "Tracheal Collapse" = "condition_612",
-   "Seasonal allergies" = "condition_426"
+   "Tracheal Collapse" = "condition_612"
 )
 
+# Format results with disease names
 results_formatted <- results %>%
   mutate(
     Disease = case_when(
@@ -472,7 +516,10 @@ results_formatted <- results %>%
 # Print results
 print(results_formatted)
 
-# Create forest plot
+# Save results to file
+write.csv(results_formatted, "./additional stats/breed_disease_association.csv", row.names = FALSE)
+
+# Create forest plot of breed-specific disease odds ratios
 ggplot(results_formatted, aes(y = reorder(Disease, OddsRatio))) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
   geom_point(aes(x = OddsRatio), size = 3) +
@@ -482,5 +529,8 @@ ggplot(results_formatted, aes(y = reorder(Disease, OddsRatio))) +
   labs(x = "Odds Ratio (Purebred vs Mixed)",
        y = "Disease") +
   theme(text = element_text(size = 12))
+
+ggsave("./additional stats/breed_disease_odds_ratios.png", 
+       width = 10, height = 14, dpi = 600)
 ```
 
