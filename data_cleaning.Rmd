@@ -7,19 +7,14 @@ output: html_document
 
 ```{r setup}
 # Load required packages
-library(tidyverse)
-library(fastDummies)
-library(miceadds)
-library(haven)
+library(tidyverse)  # For data manipulation and visualization
+library(fastDummies)  # For creating dummy variables
+library(miceadds)  # For loading RData files
+library(haven)  # For working with labelled data
 
-# Create necessary directories
-dir_list <- c("./clean data", "./frequency tables")
-for(dir in dir_list) {
-  if(!dir.exists(dir)) {
-    dir.create(dir, recursive = TRUE)
-    cat("Created directory:", dir, "\n")
-  }
-}
+# Create necessary output directories if they don't exist
+dir.create("./clean data", showWarnings = FALSE, recursive = TRUE)
+dir.create("./frequency tables", showWarnings = FALSE, recursive = TRUE)
 ```
 
 ```{r data import}
@@ -199,9 +194,9 @@ lifestage_strata_cleaned <- lapply(lifestage_strata, clean_data)
 # Write the cleaned original dataset to CSV
 write.csv(merged_data_cleaned, "./clean data/cleaned_unstrat.csv", row.names = FALSE)
 
-# Write each cleaned stratum to a separate CSV file
+# Write each cleaned stratum to a separate CSV file with simplified naming
 walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned, 
-      ~write.csv(.y, paste0("./clean data/cleaned_strata_", .x, ".csv"), row.names = FALSE))
+      ~write.csv(.y, paste0("./clean data/cleaned_", .x, ".csv"), row.names = FALSE))
 ```
 
 
@@ -230,7 +225,10 @@ generate_frequency_table <- function(data, suffix = "") {
 # Generate frequency table for overall dataset
 overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
 
-# Generate frequency tables for each lifestage stratum
+# Generate frequency table for overall dataset
+overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
+
+# Generate frequency tables for each stratum with simplified naming
 strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
                            ~generate_frequency_table(.x, paste0("_", .y)))
 ```

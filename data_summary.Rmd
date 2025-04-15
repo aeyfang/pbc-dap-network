@@ -5,15 +5,6 @@ date: "2024-07-20"
 output: html_document
 ---
 
-```{r load packages}
-library(tidyverse)  
-library(gt)
-library(gtsummary)
-library(webshot2)
-library(stats)
-library(cowplot)
-```
-
 ```{r setup}
 # Load required packages
 library(tidyverse)  # For data manipulation and visualization
@@ -23,7 +14,7 @@ library(webshot2)   # For saving tables as images
 library(stats)      # For statistical operations
 library(cowplot)    # For combining plots
 
-# Create necessary output directories if they don't exist
+# Create necessary output directories
 dir.create("./summary statistics", showWarnings = FALSE, recursive = TRUE)
 dir.create("./supplementary figures", showWarnings = FALSE, recursive = TRUE)
 ```
