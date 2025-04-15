@@ -1,5 +1,5 @@
 ---
-title: "data_analysis"
+title: "undirected_network_analysis"
 author: "Antoinette Fang"
 date: "2024-07-21"
 output: html_document
