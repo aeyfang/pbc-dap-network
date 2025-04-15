@@ -1,0 +1,124 @@
+"source","source_name","target","target_name","p_value"
+"116","Nuclear sclerosis","304","Dental calculus (yellow build-up on teeth)",8.29642048340577e-218
+"304","Dental calculus (yellow build-up on teeth)","305","Extracted teeth",3.67873364693672e-132
+"311","Retained deciduous (baby) teeth","304","Dental calculus (yellow build-up on teeth)",1.71519608369712e-107
+"1609","Coccidia","1617","Giardia",3.44571395248098e-107
+"313","Underbite","304","Dental calculus (yellow build-up on teeth)",1.84462401067468e-101
+"1106","Degenerative joint disease","1113","Osteoarthritis",1.08558208131225e-99
+"423","Pruritis (itchy skin)","426","Seasonal allergies",1.24100546849785e-75
+"412","Food or medicine allergies that affect the skin","426","Seasonal allergies",5.35213422117695e-67
+"408","Contact dermatitis","426","Seasonal allergies",1.88966860882453e-65
+"305","Extracted teeth","306","Fractured teeth",3.4488458272097e-62
+"405","Atopic dermatitis (atopy)","426","Seasonal allergies",1.45091158614518e-59
+"104","Keratoconjunctivitis sicca (KCS)","202","Ear Infection",8.28923280226936e-50
+"313","Underbite","305","Extracted teeth",1.30229630757897e-48
+"407","Chronic or recurrent skin infections","426","Seasonal allergies",2.55156197667568e-48
+"101","Blindness","198","Other eye condition",1.43460365406252e-39
+"421","Pododermatitis","423","Pruritis (itchy skin)",2.67490886606861e-39
+"406","Chronic or recurrent hot spots","426","Seasonal allergies",3.98049709083129e-37
+"1105","Cruciate ligament rupture","1898","Other trauma",5.55691934379169e-36
+"1210","Intervertebral disc disease (IVDD) (Neurologic)","1898","Other trauma",7.20891741158526e-35
+"410","Flea allergy dermatitis","426","Seasonal allergies",1.27677607493552e-33
+"610","Pneumonia","1605","Bordetella and/or parainfluenza (kennel cough)",1.13398167578259e-32
+"410","Flea allergy dermatitis","411","Fleas",3.90332296694051e-32
+"114","Iris cyst","306","Fractured teeth",5.8181031180012e-32
+"208","Rhinitis","426","Seasonal allergies",1.85919300087822e-30
+"1110","Hip dysplasia","1113","Osteoarthritis",5.64595222047547e-30
+"405","Atopic dermatitis (atopy)","423","Pruritis (itchy skin)",6.54503184419778e-30
+"407","Chronic or recurrent skin infections","423","Pruritis (itchy skin)",6.89410976602304e-30
+"1622","Hookworms","1634","Roundworms",3.20273102702663e-28
+"408","Contact dermatitis","423","Pruritis (itchy skin)",4.34130756592315e-25
+"1307","Diabetes mellitus (common diabetes which causes high blood sugar)","102","Cataracts",2.5620614439278e-24
+"1634","Roundworms","1637","Tapeworms",4.86945462370319e-24
+"412","Food or medicine allergies that affect the skin","712","Food or medicine allergies",2.07710098228638e-23
+"1117","Patellar luxation","1198","Other orthopedic condition",2.38001414194907e-23
+"112","Entropion (eyelid rolled in)","198","Other eye condition",1.81168008952961e-21
+"1622","Hookworms","1637","Tapeworms",3.67459880409264e-21
+"404","Alopecia (hair loss)","423","Pruritis (itchy skin)",4.92172057576575e-21
+"410","Flea allergy dermatitis","423","Pruritis (itchy skin)",1.05871149400178e-20
+"414","Lick granuloma","423","Pruritis (itchy skin)",2.41262274045177e-20
+"914","Urinary crystals or stones in bladder or urethra","916","Urinary tract infection (chronic or recurrent)",7.83833032396075e-20
+"310","Overbite","398","Other oral condition",2.1566192267874e-19
+"612","Tracheal collapse","1117","Patellar luxation",6.92616183875872e-19
+"1804","Fractured bone (long bone in limb)","1810","Hit by car or other vehicle",7.31277800830493e-19
+"406","Chronic or recurrent hot spots","423","Pruritis (itchy skin)",1.97346882992938e-18
+"404","Alopecia (hair loss)","405","Atopic dermatitis (atopy)",2.35561337691849e-18
+"711","Fecal incontinence","915","Urinary incontinence",5.3298070592969e-18
+"1110","Hip dysplasia","1198","Other orthopedic condition",1.47565909118685e-17
+"1616","Gastrointestinal parasites","1637","Tapeworms",1.71576704914284e-17
+"906","Acute kidney failure","1704","Ingestion of human medications",1.77760136701726e-17
+"1616","Gastrointestinal parasites","1634","Roundworms",2.2800632767437e-17
+"1106","Degenerative joint disease","1110","Hip dysplasia",2.78654489906372e-17
+"719","Other allergies","202","Ear Infection",4.6712533583733e-17
+"410","Flea allergy dermatitis","412","Food or medicine allergies that affect the skin",4.84321120780345e-17
+"412","Food or medicine allergies that affect the skin","423","Pruritis (itchy skin)",8.27767585154553e-17
+"414","Lick granuloma","426","Seasonal allergies",3.87495090856002e-16
+"1601","Anaplasmosis","1627","Lyme disease",1.13898200640425e-15
+"407","Chronic or recurrent skin infections","412","Food or medicine allergies that affect the skin",2.2544569224118e-15
+"421","Pododermatitis","712","Food or medicine allergies",5.67641964376126e-15
+"1616","Gastrointestinal parasites","1622","Hookworms",5.94634371527359e-15
+"398","Other oral condition","1898","Other trauma",9.39059434065995e-15
+"1816","Tail injury","1817","Torn or broken toenail",2.5003905271636e-14
+"1619","Heartworm infection","1622","Hookworms",5.95266249585352e-14
+"1609","Coccidia","1634","Roundworms",2.1228945327596e-13
+"405","Atopic dermatitis (atopy)","412","Food or medicine allergies that affect the skin",2.50768978328205e-13
+"304","Dental calculus (yellow build-up on teeth)","307","Gingivitis (red, puffy gums)",8.65484632582695e-13
+"1609","Coccidia","1622","Hookworms",1.7203364772184e-12
+"408","Contact dermatitis","412","Food or medicine allergies that affect the skin",4.35605903795341e-12
+"1106","Degenerative joint disease","1112","Lameness (chronic or recurrent)",6.46812152043284e-12
+"709","Chronic or recurrent vomiting","712","Food or medicine allergies",2.73268115496346e-11
+"608","Laryngeal paralysis (Respiratory)","1211","Laryngeal paralysis (Neurologic)",3.25026020569827e-11
+"404","Alopecia (hair loss)","412","Food or medicine allergies that affect the skin",3.35819645253757e-11
+"403","Umbilical hernia (Skin)","704","Umbilical hernia (Gastrointestinal)",3.48009216712866e-11
+"405","Atopic dermatitis (atopy)","406","Chronic or recurrent hot spots",2.94994523271927e-10
+"602","Tracheal stenosis (narrowing)","605","Chronic or recurrent cough",3.05158217157446e-10
+"1614","Ehrlichiosis","1627","Lyme disease",4.15589804356874e-10
+"1098","Other reproductive condition","798","Other gastrointestinal condition",4.48086887336501e-10
+"1804","Fractured bone (long bone in limb)","1805","Fractured bone (other bone in limb)",1.06790546040368e-09
+"425","Sarcoptic mange","1698","Other infectious disease",1.4566590371788e-09
+"1609","Coccidia","1616","Gastrointestinal parasites",1.51350648706913e-09
+"1809","Head trauma due to any cause","1810","Hit by car or other vehicle",1.89666380624865e-09
+"604","Chronic or recurrent bronchitis","605","Chronic or recurrent cough",2.96031485535365e-09
+"411","Fleas","423","Pruritis (itchy skin)",3.98585802780146e-09
+"708","Chronic or recurrent diarrhea","712","Food or medicine allergies",4.32317424930033e-09
+"406","Chronic or recurrent hot spots","412","Food or medicine allergies that affect the skin",4.55697423995267e-09
+"514","Hypertension (high blood pressure)","908","Chronic kidney disease",1.01108027429351e-08
+"411","Fleas","432","Ticks",2.48440804306894e-08
+"1634","Roundworms","1640","Whipworms",2.69187136499843e-08
+"430","Systemic demodectic mange","1698","Other infectious disease",3.66817404568869e-08
+"915","Urinary incontinence","916","Urinary tract infection (chronic or recurrent)",4.06784261109632e-08
+"101","Blindness","102","Cataracts",6.60027276765514e-08
+"1805","Fractured bone (other bone in limb)","1810","Hit by car or other vehicle",6.77357971855936e-08
+"1998","Other Immune","1817","Torn or broken toenail",9.26677563728419e-08
+"1615","Fever of unknown origin","709","Chronic or recurrent vomiting",9.63978096900259e-08
+"1108","Elbow dysplasia","1110","Hip dysplasia",1.02803657955332e-07
+"1813","Penetrating wound (such as a stick)","1817","Torn or broken toenail",1.24608449887051e-07
+"406","Chronic or recurrent hot spots","407","Chronic or recurrent skin infections",1.79563094431765e-07
+"198","Other eye condition","1898","Other trauma",1.91226225811469e-07
+"430","Systemic demodectic mange","432","Ticks",2.07430019805618e-07
+"1112","Lameness (chronic or recurrent)","306","Fractured teeth",2.14029113156478e-07
+"104","Keratoconjunctivitis sicca (KCS)","109","Corneal ulcer",2.34608886434528e-07
+"708","Chronic or recurrent diarrhea","709","Chronic or recurrent vomiting",2.54621392359492e-07
+"712","Food or medicine allergies","202","Ear Infection",2.57380044695645e-07
+"203","Ear Mites","411","Fleas",2.86907361364458e-07
+"607","Elongated soft palate","109","Corneal ulcer",3.31723949015066e-07
+"1111","Intervertebral disc disease (IVDD) (Orthopedic)","1210","Intervertebral disc disease (IVDD) (Neurologic)",4.81842279841135e-07
+"205","Hearing loss (incompletely deaf)","202","Ear Infection",4.82744543707005e-07
+"304","Dental calculus (yellow build-up on teeth)","306","Fractured teeth",6.73846585347417e-07
+"405","Atopic dermatitis (atopy)","407","Chronic or recurrent skin infections",9.13949746823581e-07
+"421","Pododermatitis","424","Pyoderma or bacterial dermatitis",1.01813721022702e-06
+"914","Urinary crystals or stones in bladder or urethra","915","Urinary incontinence",1.66455642288466e-06
+"1210","Intervertebral disc disease (IVDD) (Neurologic)","1298","Other neurologic condition",1.76521300014962e-06
+"1634","Roundworms","432","Ticks",2.5348186606099e-06
+"512","Congestive heart failure","519","Valve disease",2.96601778003491e-06
+"906","Acute kidney failure","908","Chronic kidney disease",3.42704371141024e-06
+"1622","Hookworms","1640","Whipworms",4.24522783693831e-06
+"407","Chronic or recurrent skin infections","408","Contact dermatitis",4.97421856282729e-06
+"305","Extracted teeth","307","Gingivitis (red, puffy gums)",6.00421360135689e-06
+"404","Alopecia (hair loss)","407","Chronic or recurrent skin infections",7.41365560178178e-06
+"607","Elongated soft palate","698","Other respiratory condition",2.11727624839444e-05
+"1307","Diabetes mellitus (common diabetes which causes high blood sugar)","101","Blindness",2.21981650983467e-05
+"709","Chronic or recurrent vomiting","809","Pancreatitis",2.40935422410487e-05
+"1812","Laceration","1817","Torn or broken toenail",2.50703557337621e-05
+"206","Hematoma","202","Ear Infection",2.98999700528991e-05
+"708","Chronic or recurrent diarrhea","1617","Giardia",3.27685581610322e-05

@@ -5,31 +5,60 @@ date: "2023-02-26"
 output: html_document
 ---
 
-```{r}
-library(tidyverse)  
-library(lubridate)  
-library(furrr)      
-library(haven)      
-library(readxl)     
-library(writexl)    
 
+```{r setup}
+library(tidyverse)  # For data manipulation and visualization
+library(lubridate)  # For date handling
+library(furrr)      # For parallel processing
+library(haven)      # For reading SPSS/SAS data
+library(readxl)     # For reading Excel files
+library(writexl)    # For writing Excel files
+
+# Set up parallel processing for faster computation
 plan(multisession)
+
+# Ensure all required directories exist
+
+required_dirs <- c(
+  "./clean data", 
+  "./individual stats",
+  "./pair stats", 
+  "./directed network",
+  "./Cytoscape inputs",
+  "./frequency tables",
+  "./reference tables"
+)
+
+# Create directories if they don't exist
+for(dir in required_dirs) {
+  if(!dir.exists(dir)) {
+    dir.create(dir, recursive = TRUE)
+    message(paste("Created directory:", dir))
+  }
+}
 ```
 
-```{r}
+```{r data loading}
 # Read in data
+
+# Load health condition data (from DAP project)
 load("./DAP_2021_HLES_health_conditions_v1.0.RData")
-health_condition<-HLES_health_conditions
+health_condition <- HLES_health_conditions
+
+# Load dog owner data (from DAP project)
 load("./DAP_2021_HLES_dog_owner_v1.0.RData")
-dog_owner<-HLES_dog_owner
-cleaned_data<-read.csv("./clean data/cleaned_unstrat.csv")
-personalized_probability<-read.csv("./individual stats/probability_unstrat.csv")
-personalized_probability<-cbind(dog_id = cleaned_data$dog_id,personalized_probability)
-undirected_comorbid_pairs<-read_xlsx("./Cytoscape inputs/formatted_pairs_unstrat.xlsx")
+dog_owner <- HLES_dog_owner
+
+# Load previously processed data files
+cleaned_data <- read.csv("./clean data/cleaned_unstrat.csv")
+personalized_probability <- read.csv("./individual stats/probability_unstrat.csv")
+personalized_probability <- cbind(dog_id = cleaned_data$dog_id, personalized_probability)
+undirected_comorbid_pairs <- read_xlsx("./Cytoscape inputs/formatted_pairs_unstrat.xlsx")
 disease_frequencies <- read_csv("./frequency tables/disease_frequencies_unstrat.csv")
 ```
+```{r medical history processing}
+# Process health condition data to determine medical history length and diagnosis dates
 
-```{r}
 # Function to safely convert values to numeric, handling labelled data
 safe_as_numeric <- function(x) {
   if(inherits(x, "haven_labelled")) {
@@ -49,23 +78,26 @@ safe_date_convert <- function(x) {
   as_date(parse_date_time(x, orders = c("ymd", "mdy", "dmy")))
 }
 
-# Get dog ages from test_clean_data
+# Get dog ages from cleaned_data
 dog_ages <- cleaned_data %>%
   dplyr::select(dog_id, dd_age_years) %>%
   mutate(dd_age_years = safe_as_numeric(dd_age_years))
 
-# Get survey completion dates from dog_owner_test
+# Get survey completion dates from dog_owner
 survey_dates <- dog_owner %>%
   dplyr::select(dog_id, st_hles_completion_date) %>%
   mutate(st_hles_completion_date = safe_date_convert(st_hles_completion_date))
 
 # Calculate medical record length and latest diagnosis date
+# This represents the span between a dog's earliest and latest reported conditions
 medical_record_data <- health_condition %>%
   mutate(across(c(hs_diagnosis_year, hs_diagnosis_month), safe_as_numeric)) %>%
+  # Filter out invalid dates
   mutate(
     hs_diagnosis_year = if_else(hs_diagnosis_year < 1900 | hs_diagnosis_year > 2023, NA_real_, hs_diagnosis_year),
     hs_diagnosis_month = if_else(hs_diagnosis_month < 1 | hs_diagnosis_month > 12, NA_real_, hs_diagnosis_month)
   ) %>%
+  # Create date objects from year and month
   mutate(date = make_date(hs_diagnosis_year, hs_diagnosis_month, 1)) %>%
   group_by(dog_id) %>%
   summarise(
@@ -75,6 +107,7 @@ medical_record_data <- health_condition %>%
     valid_dates = sum(!is.na(date)),
     .groups = "drop"
   ) %>%
+  # Filter out records with invalid dates
   filter(!is.infinite(earliest_date), !is.infinite(latest_date), valid_dates > 0)
 
 # Join all data and calculate age at latest diagnosis
@@ -82,7 +115,9 @@ final_data <- medical_record_data %>%
   inner_join(dog_ages, by = "dog_id") %>%
   inner_join(survey_dates, by = "dog_id") %>%
   mutate(
+    # Calculate time between latest diagnosis and survey completion
     years_since_latest_diagnosis = interval(latest_date, st_hles_completion_date) / years(1),
+    # Calculate dog's age at time of latest diagnosis
     age_at_latest_diagnosis = dd_age_years - years_since_latest_diagnosis
   )
 
@@ -92,6 +127,7 @@ check_data <- final_data %>%
     record_length_years = record_length_months / 12,
     age_at_latest_diagnosis = as.numeric(age_at_latest_diagnosis) # Ensure it's numeric
   ) %>%
+  # Apply logical filters to ensure data consistency
   filter(
     record_length_years <= dd_age_years, # Record length should not exceed current age
     age_at_latest_diagnosis >= 0, # Age at last diagnosis should be non-negative
@@ -101,6 +137,7 @@ check_data <- final_data %>%
     valid_dates > 1, # Remove dogs with only one diagnosis date
     age_at_latest_diagnosis >= record_length_years # Ensure age at last diagnosis is not less than record length
   ) %>%
+  # Create age categories for visualization and analysis
   mutate(
     age_cat = cut(age_at_latest_diagnosis, 
                   breaks = c(0, 3, 6, 9, 12, 15, 18, 21, Inf),
@@ -108,11 +145,13 @@ check_data <- final_data %>%
                   right = FALSE)
   )
 
-# Save file
+# Save processed data
 write.csv(check_data, "./directed network/diagnosis_date_data.csv", row.names = FALSE)
 ```
 
-```{r}
+```{r visualize medical history}
+#' Create a boxplot showing medical record length vs. age at last recorded condition
+
 # Boxplot of medical record length vs Age at Last Diagnosis
 p <- ggplot(data = check_data, aes(x = age_cat, y = record_length_years, fill = age_cat)) +
   geom_boxplot() +
@@ -128,19 +167,24 @@ p <- ggplot(data = check_data, aes(x = age_cat, y = record_length_years, fill = 
         legend.text = element_text(size = 14)) +
   scale_fill_grey(start = 0.8, end = 0.2)
 
-p
+# Display the plot
+print(p)
 
+# Save the visualization
 ggsave("./supplementary figures/S3_Fig.tiff", p, 
        width = 9, height = 6, dpi = 600, compression ="lzw")
 ```
-```{r}
+
+```{r temporal data preparation}
+
+# Convert health condition data to the right format for temporal analysis
 # Convert health_condition to right data type
 health_condition <- health_condition %>%
     mutate(
         hs_diagnosis_year = as.numeric(as.character(hs_diagnosis_year)),
         hs_diagnosis_month = as.numeric(as.character(hs_diagnosis_month)),
         hs_condition = as.numeric(as.character(hs_condition)),
-        dog_id = as.numeric(as.character(dog_id))  # Add this line
+        dog_id = as.numeric(as.character(dog_id))
     )
 
 # Make sure cleaned_data dog_id is also numeric
@@ -156,6 +200,7 @@ personalized_probability <- personalized_probability %>%
     )
 
 # Create comprehensive mapping dataframe from disease_frequencies
+# This mapping connects numerical disease codes to column names and disease names
 disease_mapping <- disease_frequencies %>%
   mutate(
     column_name = case_when(
@@ -180,8 +225,13 @@ get_column_name <- function(disease_code) {
   }
   return(col_name)
 }
+```
 
-# Analyze disease pair function
+```{r disease pair temporal analysis}
+#' Analyze the temporal relationships between disease pairs
+
+# Define function to analyze a disease pair
+# This function determines which condition typically precedes the other
 analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condition, personalized_probability, disease_mapping, window_size = 12) {
   
   # Convert disease codes to proper column names
@@ -220,7 +270,7 @@ analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condit
            !is.na(hs_diagnosis_month)) %>%
     pull(dog_id)
   
-  # Find common dogs
+  # Find common dogs (dogs that have both conditions)
   dogs_with_both <- intersect(dogs_disease1, dogs_disease2)
   dogs_with_both <- as.character(dogs_with_both)
   
@@ -251,34 +301,41 @@ analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condit
     )
   
   # Join temporal data and calculate window probabilities
+  # This determines the temporal ordering of conditions and adjusts for time window
   temporal_data <- inner_join(temporal_data1, temporal_data2, by = "dog_id") %>%
     mutate(
+      # Calculate absolute time difference in months
       months_between = abs((year2 - year1) * 12 + (month2 - month1)),
+      # Calculate window probability based on time difference
       window_prob = case_when(
         months_between <= window_size ~ 1,
         TRUE ~ (window_size/months_between) * (2 - window_size/months_between)
       ),
+      # Determine which disease came first
       first_disease = if_else(
         year1 < year2 | (year1 == year2 & month1 <= month2),
         disease1, disease2
       )
     )
   
-  # Get probabilities
+  # Get individualized probabilities for each dog
   prob_data <- personalized_probability[personalized_probability$dog_id %in% dogs_with_both, 
                                       c("dog_id", col1, col2)]
   
-  # Calculate results with disease names
+  # Get disease names for results
   disease1_name <- disease_mapping %>% filter(disease_code == disease1) %>% pull(Disease.Name)
   disease2_name <- disease_mapping %>% filter(disease_code == disease2) %>% pull(Disease.Name)
   
+  # Calculate and return results
   results <- data.frame(
     disease1 = disease1,
     disease2 = disease2,
     disease1_name = disease1_name,
     disease2_name = disease2_name,
+    # Expected counts based on the Poisson binomial model
     expected_disease1_before_disease2 = sum(prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob),
     expected_disease2_before_disease1 = sum(prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob),
+    # Variance calculations for statistical testing
     variance_disease1_before_disease2 = sum(
       (prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob) * 
       (1 - prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob)
@@ -287,6 +344,7 @@ analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condit
       (prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob) * 
       (1 - prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob)
     ),
+    # Actual observed counts
     count_disease1_first = sum((temporal_data$first_disease == disease1) * temporal_data$window_prob),
     count_disease2_first = sum((temporal_data$first_disease == disease2) * temporal_data$window_prob)
   )
@@ -294,7 +352,7 @@ analyze_disease_pair <- function(disease1, disease2, cleaned_data, health_condit
   return(results)
 }
 
-# Run the parallel mapping
+# Run the parallel mapping - analyze each disease pair from the undirected network
 direct_expected_counts <- future_map_dfr(1:nrow(undirected_comorbid_pairs), ~{
   disease_pair <- undirected_comorbid_pairs[.x, ]
   analyze_disease_pair(
@@ -316,11 +374,14 @@ write.csv(direct_expected_counts,
           row.names = FALSE)
 ```
 
-```{r}
+```{r calculate p-values}
+# Calculate statistical significance for temporal relationships
+
 # Calculate p-values and determine significance with bonferroni correction
 results <- direct_expected_counts %>%
   mutate(
-    # Calculate initial p-values
+    # Calculate initial p-values for each direction
+    # Tests whether observed count is significantly higher than expected
     p_value_1to2 = pnorm(count_disease1_first, 
                          mean = expected_disease1_before_disease2, 
                          sd = sqrt(variance_disease1_before_disease2), 
@@ -330,7 +391,7 @@ results <- direct_expected_counts %>%
                          sd = sqrt(variance_disease2_before_disease1), 
                          lower.tail = FALSE)
   ) %>%
-  # Store all p-values in a vector for simultaneous correction
+  # Apply Bonferroni correction for multiple testing
   mutate(
     adj_p_value_1to2 = p.adjust(p_value_1to2, method = "bonferroni"),
     adj_p_value_2to1 = p.adjust(p_value_2to1, method = "bonferroni"),
@@ -339,6 +400,7 @@ results <- direct_expected_counts %>%
   )
 
 # Create output for Cytoscape with both raw and adjusted p-values
+# Extract only the significant directed edges
 direct_significant_pairs <- results %>%
   # Create rows for significant 1->2 relationships using adjusted p-values
   {bind_rows(
@@ -358,33 +420,35 @@ direct_significant_pairs <- results %>%
   )} %>%
   arrange(adjusted_p_value)  # Sort by adjusted p-value
 
-# Save formatted network attributes
+# Save formatted network attributes for Cytoscape
 write_xlsx(direct_significant_pairs, "./Cytoscape inputs/formatted_pairs_directed.xlsx")
 
-# First let's check the actual column names
-names(disease_frequencies)  
+```
+
+```{r network attribute tables}
+# Create crosswalk tables with disease names for visualization and analysis
 
 # Create a lookup table for disease names 
-disease_reference <- disease_frequencies %>%
+disease_crosswalk <- disease_frequencies %>%
   dplyr::select(Code = `Numerical.Codes`, Disease.Name = `Disease.Name`) %>%
   mutate(Code = as.character(Code))  # Convert Code to character
 
 # Add disease names to the Cytoscape edges
-reference_table <- direct_significant_pairs %>%
+crosswalk_table <- direct_significant_pairs %>%
   mutate(
     source = as.character(source),  # Ensure source is character
     target = as.character(target)   # Ensure target is character
   ) %>%
-  left_join(disease_reference, by = c("source" = "Code")) %>%
+  left_join(disease_crosswalk, by = c("source" = "Code")) %>%
   rename(source_name = Disease.Name) %>%
-  left_join(disease_reference, by = c("target" = "Code")) %>%
+  left_join(disease_crosswalk, by = c("target" = "Code")) %>%
   rename(target_name = Disease.Name)
 
 # Reorder columns
-reference_table <- reference_table %>%
+crosswalk_table <- crosswalk_table %>%
   dplyr::select(source, source_name, target, target_name, p_value)
 
-write.csv(reference_table, "./reference tables/reference_direct.csv", row.names = FALSE)
+write.csv(crosswalk_table, "./reference tables/crosswalk_direct.csv", row.names = FALSE)
 
 # Create comprehensive results with one row per direction
 comprehensive_results <- results %>%
@@ -423,9 +487,9 @@ comprehensive_results <- results %>%
     )
   )} %>%
   # Add disease names
-  left_join(disease_reference, by = c("source" = "Code")) %>%
+  left_join(disease_crosswalk, by = c("source" = "Code")) %>%
   rename(source_name = Disease.Name) %>%
-  left_join(disease_reference, by = c("target" = "Code")) %>%
+  left_join(disease_crosswalk, by = c("target" = "Code")) %>%
   rename(target_name = Disease.Name) %>%
   # Select and arrange final columns
   dplyr::select(
@@ -446,4 +510,5 @@ write.csv(comprehensive_results,
           "./pair stats/comprehensive_pairs_directed.csv", 
           row.names = FALSE)
 ```
+
 
