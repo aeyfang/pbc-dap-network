@@ -1,0 +1,330 @@
+---
+title: "data_analysis"
+author: "Antoinette Fang"
+date: "2024-07-21"
+output: html_document
+---
+
+```{r setup}
+# Load required packages
+library(tidyverse)  # For data manipulation and visualization
+library(caret)      # For statistical modeling functions
+library(writexl)    # For writing Excel files
+library(furrr)      # For parallel processing
+
+# Set up parallel processing
+plan(multisession)
+
+# Create necessary output directories
+dir.create("./model coefficients", showWarnings = FALSE, recursive = TRUE)
+dir.create("./individual stats", showWarnings = FALSE, recursive = TRUE)
+dir.create("./pair stats", showWarnings = FALSE, recursive = TRUE)
+dir.create("./Cytoscape inputs", showWarnings = FALSE, recursive = TRUE)
+dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
+```
+
+```{r setup}
+# IMPORTANT: Set this to specify which dataset to analyze
+# Options:
+# - "unstrat" (for the complete, unstratified dataset)
+# - "puppy", "young_adult", "mature_adult", "senior" (for age-stratified analyses)
+#
+# NOTE: This script must be run separately for each dataset to generate all networks.
+# The outputs from data_cleaning.Rmd provide the input files for each stratum.
+analysis_type <- "unstrat"
+
+# Import and prepare data based on analysis type
+data <- read.csv(paste0("./clean data/cleaned_", analysis_type, ".csv"))
+disease_frequencies <- read.csv(paste0("./frequency tables/disease_frequencies_", analysis_type, ".csv"))
+
+# Sort data by unique identifier
+data <- data %>% dplyr::arrange(dog_id)
+
+# Create disease crosswalk table to map between codes and names
+disease_crosswalk <- disease_frequencies %>%
+  mutate(
+    code = case_when(
+      startsWith(Code.from.DAP.data, "hs_cancer_types_") ~ Code.from.DAP.data,
+      TRUE ~ paste0("condition_", Numerical.Codes)
+    )
+  ) %>%
+  select(code, Disease.Name, Numerical.Codes)
+
+# Separate predictors (demographic variables used in regression models)
+predictors <- data %>%
+  dplyr::select(
+    dd_age_years, dd_weight_lbs, dd_breed_pure_or_mixed,
+    recode.sex_2, recode.sex_3, recode.sex_4
+  )
+
+# Separate response variables (all disease columns)
+responses <- data %>%
+  dplyr::select(matches("^(condition_|hs_cancer_types)"))
+
+cat("Analysis type:", analysis_type, "\n")
+cat("Number of dogs:", nrow(data), "\n")
+cat("Number of diseases:", ncol(responses), "\n")
+```
+
+```{r helper functions}
+# Function to clean disease names for network visualization
+# Converts column names like "condition_101" to just "101" for Cytoscape
+clean_disease_name <- function(name) {
+  if(startsWith(name, "condition_")) {
+    return(sub("^condition_", "", name))
+  } else if(startsWith(name, "hs_cancer_types_")) {
+    code <- disease_frequencies %>%
+      filter(Code.from.DAP.data == name) %>%
+      pull(Numerical.Codes)
+    return(if(length(code) == 0) name else as.character(code))
+  }
+  return(name)
+}
+
+# Fit logistic regression models for individual disease risk
+# Used to account for demographic factors in comorbidity analysis
+fit_logistic <- function(response, predictors) {
+  model <- glm(response ~ ., data = predictors, family = binomial(link = "logit"))
+  coef_summary <- summary(model)$coefficients
+  tibble(
+    Term = rownames(coef_summary),
+    Coefficient = coef_summary[, "Estimate"],
+    P_value = coef_summary[, "Pr(>|z|)"]
+  )
+}
+```
+
+```{r LRM for each disease}
+# Fit models for each disease, adjusting for demographic factors
+# This accounts for the effects of age, sex, weight, etc. on disease risk
+model_results <- future_map(responses, ~fit_logistic(.x, predictors))
+
+# Combine results into a dataframe
+coef_pvalue_df <- bind_rows(
+  imap(model_results, ~mutate(.x, Disease = .y))
+)
+
+# Convert to wide format with coefficients and p-values
+coef_pvalue_wide <- coef_pvalue_df %>%
+  pivot_wider(
+    id_cols = Disease,
+    names_from = Term,
+    values_from = c(Coefficient, P_value),
+    names_glue = "{Term}_{.value}"
+  )
+
+# Add disease names for interpretability
+coef_pvalue_wide_named <- coef_pvalue_wide %>%
+  left_join(disease_crosswalk, by = c("Disease" = "code")) %>%
+  relocate(Disease.Name, .after = Disease)
+
+# Save full model results (coefficients and p-values)
+write.csv(coef_pvalue_wide_named,
+          paste0("./model coefficients/coef_and_pvalues_", analysis_type, ".csv"),
+          row.names = FALSE)
+
+# Extract just coefficients for later use
+coef_df <- coef_pvalue_wide %>%
+  dplyr::select(Disease, ends_with("_Coefficient")) %>%
+  rename_with(~str_remove(., "_Coefficient"), ends_with("_Coefficient"))
+
+coef_df_named <- coef_df %>%
+  left_join(disease_crosswalk, by = c("Disease" = "code")) %>%
+  relocate(Disease.Name, .after = Disease)
+
+write.csv(coef_df_named,
+          paste0("./model coefficients/coef_only_", analysis_type, ".csv"),
+          row.names = FALSE)
+```
+
+```{r calculate individual disease probabilities}
+# Calculate individualized disease probabilities for each dog
+# These probabilities account for demographic factors and are used in the
+# Poisson binomial approach to comorbidity (PBC) method
+risk_scores <- future_map(names(responses), function(disease) {
+  response <- responses[[disease]]
+  model <- glm(response ~ ., data = predictors, family = binomial(link = "logit"))
+  
+  # Calculate predicted probabilities
+  linear_pred <- predict(model, type = "link")
+  probabilities <- 1 / (1 + exp(-linear_pred))
+  
+  # Scale probabilities to match observed prevalence
+  # This ensures that the sum of probabilities equals the observed count
+  actual_count <- sum(response)
+  scaling_factor <- actual_count / sum(probabilities)
+  normalized_probs <- probabilities * scaling_factor
+  
+  list(probabilities = normalized_probs)
+})
+
+# Extract probabilities into a dataframe
+risk_scores_df <- map(risk_scores, "probabilities") %>%
+  bind_cols() %>%
+  setNames(names(responses))
+
+# Save individual probabilities for each disease
+# These will be used in the comorbidity network generation
+write.csv(risk_scores_df,
+          paste0("./individual stats/probability_", analysis_type, ".csv"),
+          row.names = FALSE)
+```
+
+```{r generate comorbidity network}
+# This is the core function for the Poisson binomial approach to comorbidity
+# It calculates if disease pairs co-occur more often than expected by chance,
+# while accounting for individual-specific probabilities based on demographics
+calculate_pair_statistics <- function(pair) {
+  disease1 <- pair[1]
+  disease2 <- pair[2]
+  
+  # Observed co-occurrence count
+  test_value <- sum(data[[disease1]] & data[[disease2]])
+  
+  # Get individual disease probabilities from logistic regression models
+  risk1 <- risk_scores_df[[disease1]]
+  risk2 <- risk_scores_df[[disease2]]
+  
+  # Calculate expected co-occurrence under independence
+  # This is the sum of the product of individual probabilities
+  expected_value <- sum(risk1 * risk2)
+  
+  # Calculate variance under Poisson binomial distribution
+  variance <- sum(risk1 * risk2 * (1 - risk1 * risk2))
+  
+  # Calculate z-score and p-value
+  z_score <- (test_value - expected_value) / sqrt(variance)
+  p_value <- 1 - pnorm(z_score)
+  
+  # Check if correlation is positive (more comorbid than expected)
+  # We only want pairs that occur more often than expected by chance
+  is_positive <- test_value > expected_value
+  
+  c(Disease1 = disease1,
+    Disease2 = disease2,
+    TestValue = test_value, 
+    ExpectedValue = expected_value, 
+    Variance = variance, 
+    PValue = p_value,
+    IsPositive = is_positive)
+}
+
+# Generate all possible disease pairs
+disease_pairs <- combn(names(responses), 2, simplify = FALSE)
+cat("Analyzing", length(disease_pairs), "disease pairs\n")
+
+# Calculate statistics for all pairs in parallel
+network_attributes <- future_map(
+  disease_pairs,
+  calculate_pair_statistics,
+  .options = furrr_options(seed = TRUE)
+)
+
+# Create network dataframe with results for all pairs
+network_df <- do.call(rbind, network_attributes) %>% 
+  as.data.frame() %>%
+  mutate(across(TestValue:PValue, as.numeric),
+         across(IsPositive, as.logical))
+
+# Apply multiple testing correction (Bonferroni)
+network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "bonferroni")
+
+# Save all pairs with statistics (including non-significant pairs)
+write.csv(network_df, paste0("./pair stats/all_pairs_", analysis_type, ".csv"))
+
+# Filter significant positive correlations only
+# These are the edges that will appear in the comorbidity network
+significant_pairs <- network_df %>% 
+  filter(AdjustedPValue < 0.001, IsPositive == TRUE) %>%
+  arrange(AdjustedPValue)
+
+cat("Identified", nrow(significant_pairs), "significant disease pairs\n")
+
+# Format for network visualization in Cytoscape
+# Convert column names to numerical codes for easier reference
+formatted_significant_pairs <- significant_pairs %>%
+  transmute(
+    Disease1 = map_chr(Disease1, clean_disease_name),
+    Disease2 = map_chr(Disease2, clean_disease_name)
+  )
+
+# Save results for network analysis
+# The significant_pairs file contains all statistics
+# The formatted_pairs file is prepared for direct import into Cytoscape
+write.csv(significant_pairs, 
+          paste0("./pair stats/significant_pairs_", analysis_type, ".csv"), 
+          row.names = FALSE)
+write_xlsx(formatted_significant_pairs,
+           paste0("./Cytoscape inputs/formatted_pairs_", analysis_type, ".xlsx"))
+```
+
+```{r network attribute tables}
+# Create edge attribute table with disease names and p-values
+# This provides metadata for the network edges in Cytoscape visualization
+edge_attribute_table <- formatted_significant_pairs %>%
+  mutate(
+    Disease1 = as.character(Disease1),
+    Disease2 = as.character(Disease2)
+  ) %>%
+  # Join with disease names from frequency table
+  left_join(
+    disease_frequencies %>%
+      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::select(code, Disease.Name),  
+    by = c("Disease1" = "code")
+  ) %>%
+  rename(Disease1_name = Disease.Name) %>%
+  left_join(
+    disease_frequencies %>%
+      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::select(code, Disease.Name),
+    by = c("Disease2" = "code")
+  ) %>%
+  rename(Disease2_name = Disease.Name) %>%
+  dplyr::select(Disease1, Disease1_name, Disease2, Disease2_name) %>%
+  cbind(pval = significant_pairs$AdjustedPValue)
+
+write.csv(edge_attribute_table,
+          paste0("./reference tables/edge_attributes_", analysis_type, ".csv"),
+          row.names = FALSE)
+
+# Create comprehensive attribute table with all statistics
+# This provides full details on all significant pairs for network analysis
+comprehensive_attribute_table <- network_df %>%
+  mutate(
+    Disease1_key = sapply(Disease1, clean_disease_name),
+    Disease2_key = sapply(Disease2, clean_disease_name)
+  ) %>%
+  # Join with disease frequencies for names
+  left_join(
+    disease_frequencies %>%
+      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::select(code, Disease.Name),
+    by = c("Disease1_key" = "code")
+  ) %>%
+  rename(Disease1_name = Disease.Name) %>%
+  left_join(
+    disease_frequencies %>%
+      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::select(code, Disease.Name),
+    by = c("Disease2_key" = "code")
+  ) %>%
+  rename(Disease2_name = Disease.Name) %>%
+  dplyr::select(
+    Disease1, Disease1_key, Disease1_name,
+    Disease2, Disease2_key, Disease2_name,
+    TestValue, ExpectedValue,
+    Variance,
+    PValue, AdjustedPValue
+  ) %>%
+  arrange(AdjustedPValue)
+
+write.csv(comprehensive_attribute_table,
+          paste0("./pair stats/comprehensive_edge_attributes_", analysis_type, ".csv"),
+          row.names = FALSE)
+
+cat("Network attribute tables generated for", analysis_type, "dataset.\n")
+```
+
+
+
