@@ -1,0 +1,13 @@
+"Disease1","Disease1_name","Disease2","Disease2_name","pval"
+"305","Extracted teeth","306","Fractured teeth",0
+"412","Food or medicine allergies that affect the skin","712","Food or medicine allergies",0
+"708","Chronic or recurrent diarrhea","709","Chronic or recurrent vomiting",0
+"1110","Hip dysplasia","1198","Other orthopedic condition",2.41306974402278e-12
+"708","Chronic or recurrent diarrhea","712","Food or medicine allergies",6.84661427552414e-08
+"1622","Hookworms","1634","Roundworms",1.40977279849964e-07
+"405","Atopic dermatitis (atopy)","423","Pruritis (itchy skin)",8.1458374545651e-07
+"1117","Patellar luxation","1198","Other orthopedic condition",3.82036409007913e-06
+"411","Fleas","432","Ticks",7.27075782080977e-06
+"423","Pruritis (itchy skin)","426","Seasonal allergies",1.72577364648818e-05
+"1634","Roundworms","1637","Tapeworms",5.35692269842958e-05
+"412","Food or medicine allergies that affect the skin","426","Seasonal allergies",7.25107249194279e-05

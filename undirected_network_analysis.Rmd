@@ -21,9 +21,11 @@ dir.create("./individual stats", showWarnings = FALSE, recursive = TRUE)
 dir.create("./pair stats", showWarnings = FALSE, recursive = TRUE)
 dir.create("./Cytoscape inputs", showWarnings = FALSE, recursive = TRUE)
 dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
-```
 
-```{r data loading}
+# Clear workspace and reset environment
+rm(list = ls())
+gc()
+
 # IMPORTANT: Set this to specify which dataset to analyze
 # Options:
 # - "unstrat" (for the complete, unstratified dataset)
@@ -31,8 +33,10 @@ dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 #
 # NOTE: This script must be run separately for each dataset to generate all networks.
 # The outputs from data_cleaning.Rmd provide the input files for each stratum.
-analysis_type <- "senior"
+analysis_type <- "mature_adult"
+```
 
+```{r data loading}
 # Import and prepare data based on analysis type
 data <- read.csv(paste0("./clean data/cleaned_", analysis_type, ".csv"))
 disease_frequencies <- read.csv(paste0("./frequency tables/disease_frequencies_", analysis_type, ".csv"))
