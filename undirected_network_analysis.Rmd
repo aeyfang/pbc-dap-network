@@ -23,7 +23,7 @@ dir.create("./Cytoscape inputs", showWarnings = FALSE, recursive = TRUE)
 dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 ```
 
-```{r setup}
+```{r data loading}
 # IMPORTANT: Set this to specify which dataset to analyze
 # Options:
 # - "unstrat" (for the complete, unstratified dataset)
@@ -31,7 +31,7 @@ dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 #
 # NOTE: This script must be run separately for each dataset to generate all networks.
 # The outputs from data_cleaning.Rmd provide the input files for each stratum.
-analysis_type <- "unstrat"
+analysis_type <- "senior"
 
 # Import and prepare data based on analysis type
 data <- read.csv(paste0("./clean data/cleaned_", analysis_type, ".csv"))
@@ -43,12 +43,13 @@ data <- data %>% dplyr::arrange(dog_id)
 # Create disease crosswalk table to map between codes and names
 disease_crosswalk <- disease_frequencies %>%
   mutate(
-    code = case_when(
+    Code.from.DAP.data = as.character(Code.from.DAP.data),
+    Code = case_when(
       startsWith(Code.from.DAP.data, "hs_cancer_types_") ~ Code.from.DAP.data,
       TRUE ~ paste0("condition_", Numerical.Codes)
     )
   ) %>%
-  select(code, Disease.Name, Numerical.Codes)
+  dplyr::select(Code, Disease.Name, Numerical.Codes)
 
 # Separate predictors (demographic variables used in regression models)
 predictors <- data %>%
@@ -115,7 +116,7 @@ coef_pvalue_wide <- coef_pvalue_df %>%
 
 # Add disease names for interpretability
 coef_pvalue_wide_named <- coef_pvalue_wide %>%
-  left_join(disease_crosswalk, by = c("Disease" = "code")) %>%
+  left_join(disease_crosswalk, by = c("Disease" = "Code")) %>%
   relocate(Disease.Name, .after = Disease)
 
 # Save full model results (coefficients and p-values)
@@ -129,7 +130,7 @@ coef_df <- coef_pvalue_wide %>%
   rename_with(~str_remove(., "_Coefficient"), ends_with("_Coefficient"))
 
 coef_df_named <- coef_df %>%
-  left_join(disease_crosswalk, by = c("Disease" = "code")) %>%
+  left_join(disease_crosswalk, by = c("Disease" = "Code")) %>%
   relocate(Disease.Name, .after = Disease)
 
 write.csv(coef_df_named,
