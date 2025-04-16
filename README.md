@@ -50,7 +50,7 @@ The code consists of five main R Markdown scripts that should be executed in the
 - Analyzes disease frequencies
 - Produces Table 1 and supplementary figures
 
-### 3. `data_analysis.Rmd`
+### 3. `undirected_network_analysis.Rmd`
 - Fits logistic regression models for each health condition
 - Calculates individual disease probabilities
 - Identifies significant comorbidity pairs
