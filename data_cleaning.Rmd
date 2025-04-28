@@ -27,6 +27,47 @@ load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dog_own
 # Load crosswalk between DAP disease codes and numerical codes
 # This file is found in the GitHub repo
 disease_code<-read.csv(file = "./diseaseCodes.csv")
+
+# Load correction files for non-cancer conditions 
+# Owners were given the option to select "other" for each condition category and to give a written description for said condition. Some of these written descriptions can be recategorized as existing conditions in the survey.
+# The following dataframes contain the necessary information to make these adjustments
+# These files can be found in the GitHub repo
+# Get all non-cancer correction file paths that match the pattern
+non_cancer_correction_files <- list.files(path = "./written description non cancer", 
+                               pattern = "^written_description_non_cancer.+\\.csv$", 
+                               full.names = TRUE)
+
+# Extract the unique part of each filename to use as the dataframe name
+# Remove the common prefix and file extension
+non_cancer_correction_names <- gsub("written_description_non_cancer - |\\.csv", "", basename(non_cancer_correction_files))
+
+# Load each file into its own dataframe with the distinctive name
+for (i in seq_along(non_cancer_correction_files)) {
+  # Create the assignment expression that will load each CSV into its own dataframe
+  assign(non_cancer_correction_names[i], 
+         read.csv(non_cancer_correction_files[i], stringsAsFactors = FALSE))
+}
+
+# Load correction files for cancer conditions 
+# The same issues described above also occurred in the cancer condition dataframes
+# The following dataframes contain the necessary information to make these adjustments
+# These files can be found in the GitHub repo
+# Get all cancer correction file paths that match the pattern
+non_cancer_correction_files <- list.files(path = "./written description cancer", 
+                               pattern = "^written_description_cancer.+\\.csv$", 
+                               full.names = TRUE)
+
+# Extract the unique part of each filename to use as the dataframe name
+# Remove the common prefix and file extension
+non_cancer_correction_names <- gsub("written_description_cancer - |\\.csv", "", basename(non_cancer_correction_files))
+
+# Load each file into its own dataframe with the distinctive name
+for (i in seq_along(non_cancer_correction_files)) {
+  # Create the assignment expression that will load each CSV into its own dataframe
+  assign(non_cancer_correction_names[i], 
+         read.csv(non_cancer_correction_files[i], stringsAsFactors = FALSE))
+}
+
 ```
 
 ```{r data processing and merging}
@@ -102,10 +143,120 @@ cancer_condition <- cancer_condition %>%
                   TRUE ~ NA_real_
                 )))
 
-# Ensure all cancer type columns are numeric
-cancer_condition <- cancer_condition %>%
-  mutate(across(starts_with("hs_cancer_types"), 
-                ~as.numeric(as.character(.))))
+# Function to apply cancer condition corrections
+apply_cancer_correction <- function(cancer_condition, correction_df) {
+  # Get list of dog_ids to correct
+  dogs_to_correct <- correction_df$dog_id
+  
+  # For each dog that needs correction
+  for (dog_id in dogs_to_correct) {
+    # Find the row index in cancer_condition for this dog
+    row_idx <- which(cancer_condition$dog_id == dog_id)
+    
+    # Find the corresponding row in correction_df
+    correction_row <- correction_df[correction_df$dog_id == dog_id, ]
+    
+    # Get all cancer type columns (those starting with "hs_cancer_types_")
+    cancer_cols <- grep("^hs_cancer_types_", names(correction_row), value = TRUE)
+    
+    # Remove values from "unknown" and "other" columns first
+    if ("hs_cancer_types_unknown" %in% names(cancer_condition)) {
+      cancer_condition[row_idx, "hs_cancer_types_unknown"] <- 0
+    }
+    if ("hs_cancer_types_other" %in% names(cancer_condition)) {
+      cancer_condition[row_idx, "hs_cancer_types_other"] <- 0
+    }
+    
+    # Apply the corrections by copying values from correction_df to cancer_condition
+    for (col in cancer_cols) {
+      # Only update if the correction value is 1
+      if (correction_row[[col]] == 1) {
+        
+        # Make sure the column exists in cancer_condition
+        if (col %in% names(cancer_condition)) {
+          cancer_condition[row_idx, col] <- 1
+        } 
+      }
+    }
+  }
+  
+  return(cancer_condition)
+}
+
+cancer_condition <- apply_cancer_correction(cancer_condition, hema_cancer) # Apply hematopoeitic cancer corrections
+cancer_condition <- apply_cancer_correction(cancer_condition, bone_cancer) # Apply bone cancer corrections
+cancer_condition <- apply_cancer_correction(cancer_condition, kidney_cancer) # Apply kidney/urinary cancer corrections
+cancer_condition <- apply_cancer_correction(cancer_condition, repro_cancer) # Apply reproductive cancer corrections
+cancer_condition <- apply_cancer_correction(cancer_condition, cancer_cancer) # Apply cancer corrections
+cancer_condition <- apply_cancer_correction(cancer_condition, eye_cancer) # Apply eye cancer corrections
+cancer_condition <- apply_cancer_correction(cancer_condition, skin_cancer) # Apply skin cancer corrections
+```
+
+```{r correcting health condition misclassification}
+# Function to correct misclassified health conditions in the health_condition dataframe
+correct_health_conditions <- function(health_condition, correction_df, category_code) {
+  # Ensure dog_id is character type in both dataframes
+  health_condition <- health_condition %>% 
+    mutate(dog_id = as.character(dog_id))
+  
+  correction_df <- correction_df %>% 
+    mutate(dog_id = as.character(dog_id))
+  
+  # Create the pattern to match the "other" category codes (category_code+98)
+  other_code_pattern <- paste0("^", category_code, "98$")
+  
+  # For each dog in the correction dataframe
+  for (i in 1:nrow(correction_df)) {
+    current_dog_id <- correction_df$dog_id[i]
+    correct_condition_code <- correction_df$hs_condition[i]
+    
+    # Check if the dog already has an entry with the correct condition code
+    # Using sum() > 0 instead of any() to handle NA values properly
+    already_has_correct_entry <- sum(
+      health_condition$dog_id == current_dog_id & 
+      health_condition$hs_condition == correct_condition_code, 
+      na.rm = TRUE
+    ) > 0
+    
+    # Find the rows in health_condition for this dog that have the "other" code
+    rows_to_modify <- which(
+      health_condition$dog_id == current_dog_id & 
+      grepl(other_code_pattern, health_condition$hs_condition)
+    )
+    
+    if (length(rows_to_modify) > 0) {
+      if (already_has_correct_entry) {
+        # If the dog already has the correct entry, delete the "other" entry
+        health_condition <- health_condition[-rows_to_modify, ]
+      } else {
+        # Otherwise, replace the "other" code with the correct specific code
+        health_condition$hs_condition[rows_to_modify] <- correct_condition_code
+      }
+    }
+  }
+  
+  # Return the health_condition dataframe with corrections applied
+  return(health_condition)
+}
+
+# Apply correction function for each condition category
+health_condition <- correct_health_conditions(health_condition, bone_non_cancer, "11") # Apply bone/orthopedic condition corrections
+health_condition <- correct_health_conditions(health_condition, brain_non_cancer, "12") # Apply brain/neurological condition corrections
+health_condition <- correct_health_conditions(health_condition, cardiac_non_cancer, "5") # Apply cardiac condition corrections
+health_condition <- correct_health_conditions(health_condition, endocrine_non_cancer, "13") # Apply endocrine condition corrections
+health_condition <- correct_health_conditions(health_condition, ent_non_cancer, "2") # Apply ear/nose/throat condition corrections
+health_condition <- correct_health_conditions(health_condition, gastro_non_cancer, "7") # Apply gastrointestinal condition corrections
+health_condition <- correct_health_conditions(health_condition, hema_non_cancer, "14") # Apply hematopoeitic condition corrections
+health_condition <- correct_health_conditions(health_condition, immune_non_cancer, "19") # Apply immune-mediated condition corrections
+health_condition <- correct_health_conditions(health_condition, infection_non_cancer, "16") # Apply infection/parasites condition corrections
+health_condition <- correct_health_conditions(health_condition, kidney_non_cancer, "9") # Apply kidney/urinary condition corrections
+health_condition <- correct_health_conditions(health_condition, liver_non_cancer, "8") # Apply liver/pancreas condition corrections
+health_condition <- correct_health_conditions(health_condition, mouth_non_cancer, "3") # Apply mouth/dental/oral condition corrections
+health_condition <- correct_health_conditions(health_condition, repro_non_cancer, "10") # Apply reproductive condition corrections
+health_condition <- correct_health_conditions(health_condition, respiratory_non_cancer, "6") # Apply respiratory condition corrections
+health_condition <- correct_health_conditions(health_condition, toxin_non_cancer, "17") # Apply toxin consumption condition corrections
+health_condition <- correct_health_conditions(health_condition, eye_non_cancer, "1") # Apply eye condition corrections
+health_condition <- correct_health_conditions(health_condition, skin_non_cancer, "4") # Apply skin condition corrections
 ```
 
 ```{r health condition processing}
@@ -205,7 +356,7 @@ walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned,
 generate_frequency_table <- function(data, suffix = "") {
   # Count occurrences of each disease
   raw_disease_counts <- data %>%
-    select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
+    dplyr::select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
     summarise(across(everything(), sum)) %>%
     pivot_longer(everything(), names_to = "code", values_to = "frequency") %>%
     mutate(code = str_remove(code, "condition_"))
@@ -213,7 +364,7 @@ generate_frequency_table <- function(data, suffix = "") {
   # Join with disease code lookup table to get disease names and categories
   disease_frequencies <- disease_code %>%
     inner_join(raw_disease_counts, by = c("Code.from.DAP.data" = "code")) %>%
-    select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency') %>%
+    dplyr::select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency') %>%
     arrange(desc(frequency))
   
   # Save frequency table to CSV

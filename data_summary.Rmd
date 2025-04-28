@@ -141,7 +141,7 @@ disease_category_plot <- ggplot(disease_category_summary,
   geom_bar(stat = "identity", fill = "#1B365D", color = "#F4F4F4") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(x = "Disease Category",
+  labs(x = "Condition Category",
        y = "Total Frequency") +
   scale_y_continuous(labels = scales::comma)
 
@@ -160,7 +160,10 @@ ggsave("./summary statistics/disease_category_distribution.png",
 # Prepare data for the top 20 most frequent diseases
 top_20_diseases <- disease_frequencies %>%
   arrange(desc(frequency)) %>%
-  top_n(20, frequency)
+  top_n(20, frequency) %>%
+  mutate(Disease.Name = ifelse(Disease.Name == "Chocolate", 
+                               "Chocolate toxin consumption", 
+                               Disease.Name))
 
 # Create horizontal bar plot of top 20 diseases
 top_20_diseases_plot <- ggplot(top_20_diseases, 
@@ -168,7 +171,7 @@ top_20_diseases_plot <- ggplot(top_20_diseases,
   geom_bar(stat = "identity", fill = "#1B365D", color = "#F4F4F4") +
   coord_flip() +  # Create horizontal bars for better readability of disease names
   theme_minimal() +
-  labs(x = "Disease",
+  labs(x = "Condition",
        y = "Frequency") +
   scale_y_continuous(labels = scales::comma) +
   theme(
@@ -195,7 +198,7 @@ ggsave("./summary statistics/top_20_diseases_distribution.png",
 total_diseases_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = total_diseases)) +
   geom_histogram(binwidth = 1, color = "#F4F4F4", fill = "#1B365D") +
   theme_minimal() +
-  labs(x = "Number of Diseases",
+  labs(x = "Number of Conditions",
        y = "Frequency") +
   scale_x_continuous(breaks = seq(0, max(cleaned_without_healthy_dogs$total_diseases), by = 2)) +
   scale_y_continuous(labels = scales::comma) +
