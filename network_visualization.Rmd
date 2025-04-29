@@ -5,772 +5,256 @@ date: "2025-04-29"
 output: html_document
 ---
 
-```{r load packages}
-# Analysis script for category connectivity and singleton identification
-library(tidyverse)
+
+
+```{r}
 library(igraph)
 library(ggraph)
 library(RColorBrewer)
+# display.brewer.all()
 library(cowplot)
+library(dplyr)
+library(purrr)
+library(tidygraph)
 theme_set(theme_cowplot())
+edge_percent <- 1
+
 ```
 
-```{r load and prepare data}
-# Load data
-disease_frequencies <- read.csv("./frequency tables/disease_frequencies_unstrat.csv")
-disease_code <- read.csv("./diseaseCodes.csv")
+```{r}
+# Load significant pairs
 significant_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv")
 
-# Helper function to clean disease names
+disease_code<-read.csv(file = "./diseaseCodes.csv")
+
+# Load disease frequencies to help with hs_cancer_types mapping
+disease_frequencies <- read.csv("./frequency tables/disease_frequencies_unstrat.csv")
+
+# Define a cleaning function for disease names
 clean_disease_name <- function(name) {
-  if(startsWith(name, "condition_")) {
+  if (startsWith(name, "condition_")) {
     return(sub("^condition_", "", name))
-  } else if(startsWith(name, "hs_cancer_types_")) {
+  } else if (startsWith(name, "hs_cancer_types_")) {
     code <- disease_frequencies %>%
       filter(Code.from.DAP.data == name) %>%
       pull(Numerical.Codes)
-    return(if(length(code) == 0) name else as.character(code))
+    return(if (length(code) == 0) name else as.character(code))
   }
   return(name)
 }
 
-# Format pairs for analysis
-formatted_significant_pairs <- significant_pairs %>%
-  transmute(
-    Disease1 = map_chr(Disease1, clean_disease_name),
-    Disease2 = map_chr(Disease2, clean_disease_name),
-    AdjustedPValue = AdjustedPValue
-  )
-```
-
-```{r analyze connectivity}
-# Function to analyze category connectivity
-analyze_category_connectivity <- function(significant_pairs, disease_codes) {
-  # First, ensure we're working with clean numerical codes
-  formatted_pairs <- significant_pairs %>%
-    transmute(
-      Disease1 = as.integer(map_chr(Disease1, clean_disease_name)),
-      Disease2 = as.integer(map_chr(Disease2, clean_disease_name))
-    )
-  
-  # Get disease category mapping
-  disease_by_category <- disease_codes %>%
-    dplyr::select(Numerical.Codes, Disease.Category, Disease.Name) %>%
-    mutate(Numerical.Codes = as.integer(Numerical.Codes))
-  
-  # Initialize results data frame
-  category_connectivity <- data.frame(
-    Category = character(),
-    DiseaseCount = integer(),
-    InternalConnections = integer(),
-    ExternalConnections = integer(),
-    ConnectionRatio = numeric(),
-    stringsAsFactors = FALSE
-  )
-  
-  # For each category, analyze connection patterns
-  for (category in unique(disease_by_category$Disease.Category)) {
-    # Get all diseases in this category
-    category_diseases <- disease_by_category %>%
-      filter(Disease.Category == category) %>%
-      pull(Numerical.Codes)
-    
-    # Skip categories with only one disease (can't have internal connections)
-    if (length(category_diseases) <= 1) {
-      cat(sprintf("Skipping category '%s' - only has %d diseases\n", 
-                 category, length(category_diseases)))
-      next
-    }
-    
-    # Count connections within and outside the category
-    internal_connections <- 0
-    external_connections <- 0
-    
-    for (i in 1:nrow(formatted_pairs)) {
-      disease1 <- formatted_pairs$Disease1[i]
-      disease2 <- formatted_pairs$Disease2[i]
-      
-      # Check if diseases are in the current category
-      disease1_in_category <- disease1 %in% category_diseases
-      disease2_in_category <- disease2 %in% category_diseases
-      
-      if (disease1_in_category && disease2_in_category) {
-        # Both diseases are in this category
-        internal_connections <- internal_connections + 1
-      } else if (disease1_in_category || disease2_in_category) {
-        # One disease is in this category, the other isn't
-        external_connections <- external_connections + 1
-      }
-    }
-    
-    # Calculate connection ratio (internal / total)
-    total_connections <- internal_connections + external_connections
-    connection_ratio <- ifelse(total_connections > 0, 
-                              internal_connections / total_connections, 
-                              0)
-    
-    # Add to results
-    category_connectivity <- rbind(category_connectivity, data.frame(
-      Category = category,
-      DiseaseCount = length(category_diseases),
-      InternalConnections = internal_connections,
-      ExternalConnections = external_connections,
-      ConnectionRatio = connection_ratio,
-      stringsAsFactors = FALSE
-    ))
-  }
-  
-  # Sort by connection ratio (descending)
-  category_connectivity <- category_connectivity %>%
-    arrange(desc(ConnectionRatio))
-  
-  return(category_connectivity)
-}
-
-```
-
-```{r identify singletons}
-
-# Function to identify singletons within categories
-identify_singletons <- function(significant_pairs, disease_codes) {
-  # First, ensure we're working with clean numerical codes
-  formatted_pairs <- significant_pairs %>%
-    transmute(
-      Disease1 = as.integer(map_chr(Disease1, clean_disease_name)),
-      Disease2 = as.integer(map_chr(Disease2, clean_disease_name))
-    )
-  
-  # Get disease category mapping
-  disease_by_category <- disease_codes %>%
-    dplyr::select(Numerical.Codes, Disease.Category, Disease.Name) %>%
-    mutate(Numerical.Codes = as.integer(Numerical.Codes))
-  
-  # Initialize results list
-  singleton_analysis <- list()
-  
-  # For each category, analyze disease connections
-  for (category in unique(disease_by_category$Disease.Category)) {
-    # Get all diseases in this category
-    category_diseases <- disease_by_category %>%
-      filter(Disease.Category == category) %>%
-      pull(Numerical.Codes)
-    
-    # Skip categories with only one disease
-    if (length(category_diseases) <= 1) {
-      next
-    }
-    
-    cat(sprintf("\nAnalyzing connections for category: %s (%d diseases)\n", 
-               category, length(category_diseases)))
-    
-    # For each disease in this category, analyze connections
-    disease_connections <- data.frame()
-    
-    for (disease in category_diseases) {
-      # Find all pairs where this disease appears
-      disease_pairs <- formatted_pairs %>%
-        filter(Disease1 == disease | Disease2 == disease)
-      
-      # Count connections to same category vs other categories
-      internal_connections <- 0
-      external_connections <- 0
-      
-      if (nrow(disease_pairs) > 0) {
-        for (i in 1:nrow(disease_pairs)) {
-          # Get the other disease in the pair
-          other_disease <- ifelse(
-            disease_pairs$Disease1[i] == disease, 
-            disease_pairs$Disease2[i], 
-            disease_pairs$Disease1[i]
-          )
-          
-          # Get category of this other disease
-          other_category <- disease_by_category %>%
-            filter(Numerical.Codes == other_disease) %>%
-            pull(Disease.Category)
-          
-          if (other_category == category) {
-            internal_connections <- internal_connections + 1
-          } else {
-            external_connections <- external_connections + 1
-          }
-        }
-      }
-      
-      # Get disease name for reference
-      disease_name <- disease_by_category %>%
-        filter(Numerical.Codes == disease) %>%
-        pull(Disease.Name)
-      
-      # Add to results
-      disease_connections <- rbind(disease_connections, data.frame(
-        code = disease,
-        name = disease_name,
-        internal = internal_connections,
-        external = external_connections,
-        total = internal_connections + external_connections,
-        is_singleton = (internal_connections == 0 & external_connections > 0),
-        stringsAsFactors = FALSE
-      ))
-    }
-    
-    # Print summary for this category
-    singletons <- disease_connections %>% filter(is_singleton == TRUE)
-    cat(sprintf("  Found %d diseases in this category with connections\n", nrow(disease_connections)))
-    cat(sprintf("  %d diseases have ONLY external connections (singletons)\n", nrow(singletons)))
-    
-    if (nrow(singletons) > 0) {
-      cat("  Singleton diseases:\n")
-      for (i in 1:nrow(singletons)) {
-        cat(sprintf("    - %s (code: %d): %d external connections\n", 
-                   singletons$name[i], singletons$code[i], singletons$external[i]))
-      }
-    }
-    
-    # Save results for this category
-    singleton_analysis[[category]] <- disease_connections
-  }
-  
-  return(singleton_analysis)
-}
-```
-
-```{r visualize analysis}
-# Analyze category connectivity patterns
-cat("\n=== CATEGORY CONNECTIVITY ANALYSIS ===\n\n")
-category_analysis <- analyze_category_connectivity(significant_pairs, disease_code)
-
-# Print detailed analysis results
-cat("\nCategory connectivity summary (sorted by internal connection ratio):\n")
-print(category_analysis, row.names = FALSE)
-
-# Visualize the connection ratios
-ggplot(category_analysis, aes(x = reorder(Category, -ConnectionRatio), y = ConnectionRatio)) +
-  geom_bar(stat = "identity", aes(fill = ConnectionRatio)) +
-  scale_fill_gradient(low = "skyblue", high = "darkblue") +
-  geom_text(aes(label = sprintf("%.2f", ConnectionRatio)), vjust = -0.5, size = 3) +
-  labs(title = "Internal Connection Ratio by Disease Category",
-       subtitle = "Higher values suggest categories that can be collapsed",
-       x = "Disease Category", 
-       y = "Internal Connection Ratio") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave("category_connectivity_ratios.png", width = 12, height = 6)
-
-# Visualize the connection counts
-ggplot(category_analysis, aes(x = reorder(Category, -ConnectionRatio))) +
-  geom_bar(aes(y = InternalConnections), stat = "identity", fill = "darkblue", alpha = 0.7) +
-  geom_bar(aes(y = ExternalConnections), stat = "identity", fill = "skyblue", alpha = 0.7) +
-  geom_text(aes(y = InternalConnections, label = InternalConnections), 
-            vjust = -0.5, color = "darkblue", size = 3) +
-  geom_text(aes(y = InternalConnections + ExternalConnections, 
-                label = ExternalConnections), 
-            vjust = -0.5, color = "skyblue", size = 3) +
-  labs(title = "Internal vs External Connections by Disease Category",
-       subtitle = "Dark blue = internal connections, Light blue = external connections",
-       x = "Disease Category", 
-       y = "Number of Connections") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave("connection_counts_by_category.png", width = 12, height = 6)
-
-# Create a proportional stacked bar chart
-category_analysis_long <- category_analysis %>%
-  mutate(TotalConnections = InternalConnections + ExternalConnections) %>%
-  dplyr::select(Category, InternalConnections, ExternalConnections, TotalConnections) %>%
-  pivot_longer(
-    cols = c(InternalConnections, ExternalConnections),
-    names_to = "ConnectionType",
-    values_to = "Count"
-  )
-
-ggplot(category_analysis_long, 
-       aes(x = reorder(Category, -TotalConnections), y = Count, fill = ConnectionType)) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_fill_manual(values = c("InternalConnections" = "darkblue", 
-                               "ExternalConnections" = "skyblue"),
-                    labels = c("Internal", "External")) +
-  geom_text(aes(label = Count), 
-            position = position_fill(vjust = 0.5), 
-            color = "white", size = 3) +
-  labs(title = "Proportion of Internal vs External Connections",
-       subtitle = "Categories sorted by total connection count",
-       x = "Disease Category", 
-       y = "Proportion", 
-       fill = "Connection Type") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave("connection_proportions.png", width = 12, height = 6)
-
-# Identify singletons within categories
-cat("\n\n=== SINGLETON DISEASE ANALYSIS ===\n")
-singleton_results <- identify_singletons(significant_pairs, disease_code)
-
-# Aggregate singleton counts by category
-singleton_summary <- data.frame(
-  Category = character(),
-  TotalDiseases = integer(),
-  TotalSingletons = integer(),
-  SingletonNames = character(),
-  stringsAsFactors = FALSE
-)
-
-for (category in names(singleton_results)) {
-  category_data <- singleton_results[[category]]
-  singletons <- category_data %>% filter(is_singleton == TRUE)
-  
-  if (nrow(singletons) > 0) {
-    singleton_names <- paste(singletons$name, collapse = ", ")
-  } else {
-    singleton_names <- "None"
-  }
-  
-  singleton_summary <- rbind(singleton_summary, data.frame(
-    Category = category,
-    TotalDiseases = nrow(category_data),
-    TotalSingletons = nrow(singletons),
-    SingletonNames = singleton_names,
-    stringsAsFactors = FALSE
-  ))
-}
-
-# Print singleton summary
-cat("\nSingleton summary by category:\n")
-print(singleton_summary %>% dplyr::select(Category, TotalDiseases, TotalSingletons), row.names = FALSE)
-
-# Visualize singleton proportions
-ggplot(singleton_summary, aes(x = reorder(Category, -TotalSingletons), y = TotalDiseases)) +
-  geom_bar(stat = "identity", fill = "lightgrey") +
-  geom_bar(aes(y = TotalSingletons), stat = "identity", fill = "darkred") +
-  geom_text(aes(label = TotalDiseases), vjust = -0.5, color = "black", size = 3) +
-  geom_text(aes(y = TotalSingletons, label = TotalSingletons), 
-            vjust = -0.5, color = "darkred", size = 3) +
-  labs(title = "Singleton Diseases by Category",
-       subtitle = "Red = singleton diseases (only external connections)",
-       x = "Disease Category", 
-       y = "Number of Diseases") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave("singleton_counts_by_category.png", width = 12, height = 6)
-
-# Based on these analyses, suggest which categories to collapse
-# with different threshold options
-cat("\n\n=== CATEGORY COLLAPSING RECOMMENDATIONS ===\n\n")
-
-thresholds <- c(0.3, 0.4, 0.5, 0.6, 0.7)
-for (threshold in thresholds) {
-  categories_to_collapse <- category_analysis %>%
-    filter(ConnectionRatio >= threshold) %>%
-    arrange(desc(ConnectionRatio)) %>%
-    pull(Category)
-  
-  cat(sprintf("With threshold %.1f:\n", threshold))
-  if (length(categories_to_collapse) > 0) {
-    cat("  Recommended categories to collapse:\n")
-    for (category in categories_to_collapse) {
-      cat(sprintf("  - %s (%.2f internal connection ratio)\n", 
-                 category, 
-                 category_analysis$ConnectionRatio[category_analysis$Category == category]))
-    }
-  } else {
-    cat("  No categories meet this threshold\n")
-  }
-  cat("\n")
-}
-
-# Add analysis based on category size
-cat("\n\n=== CATEGORY SIZE ANALYSIS ===\n\n")
-
-# Count the number of diseases in each category that appear in the network
-disease_in_network <- unique(c(
-  as.integer(map_chr(significant_pairs$Disease1, clean_disease_name)),
-  as.integer(map_chr(significant_pairs$Disease2, clean_disease_name))
-))
-
-category_sizes <- disease_code %>%
-  filter(Numerical.Codes %in% disease_in_network) %>%
-  group_by(Disease.Category) %>%
-  summarize(
-    NetworkSize = n(),  # Changed column name to avoid conflict
-    .groups = 'drop'
-  ) %>%
-  arrange(desc(NetworkSize))
-
-# Print category sizes
-cat("Categories by number of conditions in the network:\n")
-print(category_sizes, row.names = FALSE)
-
-# Visualize category sizes
-ggplot(category_sizes, aes(x = reorder(Disease.Category, -NetworkSize), y = NetworkSize)) +
-  geom_bar(stat = "identity", aes(fill = NetworkSize)) +
-  scale_fill_gradient(low = "lightgreen", high = "darkgreen") +
-  geom_text(aes(label = NetworkSize), vjust = -0.5, size = 3) +
-  labs(title = "Number of Conditions per Category in Network",
-       subtitle = "Larger categories are good candidates for collapsing and creating subnetworks",
-       x = "Disease Category", 
-       y = "Number of Conditions") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave("category_sizes.png", width = 12, height = 6)
-
-# Suggest categories to collapse based on size
-size_threshold <- 10  # Consider categories with more than 10 conditions as "large"
-
-large_categories <- category_sizes %>%
-  filter(NetworkSize >= size_threshold) %>%
-  pull(Disease.Category)
-
-cat(sprintf("\nCategories with %d or more conditions (candidates for collapsing):\n", size_threshold))
-for (category in large_categories) {
-  cat(sprintf("  - %s (%d conditions)\n", 
-             category, 
-             category_sizes$NetworkSize[category_sizes$Disease.Category == category]))
-}
-
-# Combine size analysis with connectivity analysis
-cat("\n\nCombining size and connectivity analysis:\n")
-
-# Merge the datasets with non-conflicting column names
-combined_analysis <- category_analysis %>%
-  left_join(category_sizes, by = c("Category" = "Disease.Category")) %>%
+# Apply cleaning function
+significant_pairs <- significant_pairs %>%
   mutate(
-    SizeBasedCollapse = NetworkSize >= size_threshold,
-    ConnectivityBasedCollapse = ConnectionRatio >= moderate_threshold,
-    FinalRecommendation = SizeBasedCollapse | ConnectivityBasedCollapse
+    Disease1 = map_chr(Disease1, clean_disease_name),
+    Disease2 = map_chr(Disease2, clean_disease_name)
   ) %>%
-  arrange(desc(FinalRecommendation), desc(NetworkSize), desc(ConnectionRatio))
+  mutate(
+    Disease1 = as.integer(Disease1),
+    Disease2 = as.integer(Disease2)
+  ) %>%
+  filter(!is.na(Disease1) & !is.na(Disease2)) %>%
+  filter(
+    !(Disease1 %% 100 %in% c(98, 99) |
+      Disease2 %% 100 %in% c(98, 99) |
+      Disease1 == 719 |
+      Disease2 == 719)
+  )
 
-cat("Final category collapsing recommendations (considering both size and connectivity):\n")
-print(combined_analysis %>% 
-        dplyr::select(Category, DiseaseCount, NetworkSize, ConnectionRatio, SizeBasedCollapse, 
-               ConnectivityBasedCollapse, FinalRecommendation), 
-      row.names = FALSE)
-
-# Then modify the final recommendation section to incorporate size considerations
-cat("\n=== UPDATED FINAL COLLAPSING RECOMMENDATION ===\n\n")
-cat("Based on category size, connection patterns, and singleton analysis:\n")
-
-categories_to_collapse <- combined_analysis %>%
-  filter(FinalRecommendation == TRUE) %>%
-  pull(Category)
-
-cat(sprintf("1. Collapse categories that either:\n   - Have %d or more conditions, OR\n   - Have an internal connection ratio of at least %.1f\n", 
-           size_threshold, moderate_threshold))
-cat("2. Collapse these categories but keep their singletons separate:\n")
-
-for (category in categories_to_collapse) {
-  reason <- if(combined_analysis$SizeBasedCollapse[combined_analysis$Category == category] && 
-               combined_analysis$ConnectivityBasedCollapse[combined_analysis$Category == category]) {
-    "large size and high internal connectivity"
-  } else if(combined_analysis$SizeBasedCollapse[combined_analysis$Category == category]) {
-    "large size"
-  } else {
-    "high internal connectivity"
-  }
-  
-  if (category %in% singleton_summary$Category) {
-    singleton_count <- singleton_summary$TotalSingletons[singleton_summary$Category == category]
-    cat(sprintf("   - %s (%s, keeping %d singletons separate)\n", 
-               category, reason, singleton_count))
-    
-    if (singleton_count > 0) {
-      singleton_names <- singleton_summary$SingletonNames[singleton_summary$Category == category]
-      cat(sprintf("     Singletons: %s\n", singleton_names))
-    }
-  } else {
-    cat(sprintf("   - %s (%s, no singletons)\n", category, reason))
-  }
-}
-
-cat("\n3. Create separate subnetworks for these large collapsed categories:\n")
-for (category in categories_to_collapse) {
-  if (combined_analysis$SizeBasedCollapse[combined_analysis$Category == category]) {
-    network_size <- combined_analysis$NetworkSize[combined_analysis$Category == category]
-    internal_connections <- combined_analysis$InternalConnections[combined_analysis$Category == category]
-    cat(sprintf("   - %s (%d conditions, %d internal connections)\n", 
-               category, network_size, internal_connections))
-  }
-}
-
-cat("\n4. Keep these categories uncollapsed (small size and low internal connection ratio):\n")
-categories_to_keep <- combined_analysis %>%
-  filter(FinalRecommendation == FALSE) %>%
-  arrange(ConnectionRatio) %>%
-  pull(Category)
-
-for (category in categories_to_keep) {
-  cat(sprintf("   - %s (%d conditions, %.2f internal connection ratio)\n", 
-             category,
-             combined_analysis$NetworkSize[combined_analysis$Category == category],
-             combined_analysis$ConnectionRatio[combined_analysis$Category == category]))
-}
 ```
 
 ```{r}
-# Get the top 10 most populous categories
-top_categories <- category_sizes %>%
-  arrange(desc(NetworkSize)) %>%
-  head(10) %>%
-  pull(Disease.Category)
-
-# Create a color palette
-n_colors <- length(top_categories) + 1  # +1 for "Other"
-color_palette <- brewer.pal(min(9, n_colors), "Set1")
-if (n_colors > 9) {
-  color_palette <- c(color_palette, brewer.pal(min(8, n_colors - 9), "Set2"))
-}
-names(color_palette) <- c(top_categories, "Other")
-
-# Process the disease code data to create collapsing mapping
-disease_code_for_collapsing <- disease_code %>%
-  mutate(module = Numerical.Codes)  # Start with no collapsing (each disease is its own module)
-
-# For each category recommended for collapsing
-for (category in categories_to_collapse) {
-  # Find all diseases in this category
-  category_diseases <- disease_code %>%
-    filter(Disease.Category == category) %>%
-    pull(Numerical.Codes)
-  
-  # Choose a representative code for this category
-  representative_code <- min(category_diseases)
-  
-  # Get singletons for this category (if any)
-  if (category %in% names(singleton_results)) {
-    singletons <- singleton_results[[category]] %>% 
-      filter(is_singleton == TRUE) %>%
-      pull(code)
-    
-    # Collapse non-singleton diseases into the representative code
-    disease_code_for_collapsing$module[
-      disease_code_for_collapsing$Disease.Category == category & 
-      !(disease_code_for_collapsing$Numerical.Codes %in% singletons)
-    ] <- representative_code
-  } else {
-    # If no singleton analysis, collapse all diseases in this category
-    disease_code_for_collapsing$module[
-      disease_code_for_collapsing$Disease.Category == category
-    ] <- representative_code
-  }
-}
-
-# Create modules dataframe for visualization
-modules <- disease_code_for_collapsing %>%
-  mutate(
-    category = Disease.Category,
-    code = Numerical.Codes
-  ) %>%
-  dplyr::select(code, category, module, Disease.Name)
-
-# Assign consolidated category for coloring (top 10 categories + "Other")
-modules <- modules %>%
-  mutate(consolidated_category = ifelse(
-    category %in% top_categories, 
-    category, 
-    'Other'
-  ))
-
-# Get a list of all the "other" condition codes
-other_codes <- disease_code %>%
-  filter(
-    endsWith(as.character(Numerical.Codes), "98") | 
-    endsWith(as.character(Numerical.Codes), "99") |
-    Numerical.Codes == 719
-  ) %>%
-  pull(Numerical.Codes)
-
-# Print the codes we're filtering out
-cat("Filtering out", length(other_codes), "other condition codes\n")
-print(other_codes)
-
-# Apply the filter
-formatted_significant_pairs <- formatted_significant_pairs %>%
-  filter(
-    !(Disease1 %in% other_codes) & 
-    !(Disease2 %in% other_codes)
-  )
-
-# Make sure to propagate this change by adding a note when printing stats:
-cat("Filtered out 'other' category codes (ending in 98, 99, and 719)\n")
-
-# Prepare edge data with category information
 formatted_significant_pairs <- significant_pairs %>%
   transmute(
-    Disease1 = as.integer(map_chr(Disease1, clean_disease_name)),
-    Disease2 = as.integer(map_chr(Disease2, clean_disease_name)),
+    Disease1 = Disease1,
+    Disease2 = Disease2,
     weight = AdjustedPValue
   )
 
-# Add category information to edges
-temp1 <- inner_join(
-  formatted_significant_pairs,
-  modules %>% 
-    dplyr::select(code, consolidated_category) %>% 
-    rename(Disease1 = code, category1 = consolidated_category),
-  by = 'Disease1'
-)
+class(formatted_significant_pairs$Disease1)
+```
 
-temp2 <- inner_join(
-  formatted_significant_pairs,
-  modules %>% 
-    dplyr::select(code, consolidated_category) %>% 
-    rename(Disease2 = code, category2 = consolidated_category),
-  by = 'Disease2'
-)
 
-formatted_significant_pairs <- formatted_significant_pairs %>%
+```{r}
+most.prevalent.category <- c('Brain/Neurologic', 
+                             'Cancer',
+                             'Kidney/Urinary',
+                             'Cardiac', 
+                             'Gastrointestinal',
+                             'Ear/Nose/Throat',
+                             'Skin','Eye','Liver/Pancreas'
+                              )
+
+# Get enough colors (9 prevalent + 1 Other + 1 Cross-category)
+all.colors <- brewer.pal(length(most.prevalent.category) + 2, "Paired")
+
+# Assign category labels
+categoryLabels <- c(sort(most.prevalent.category), "Other", "Cross-category")
+names(all.colors) <- categoryLabels
+```
+
+```{r}
+# 1. Build early_graph
+early_graph <- graph_from_data_frame(formatted_significant_pairs, directed = FALSE)
+
+# 2. Attach consolidated category
+modules <- disease_code %>%
   mutate(
-    category1 = temp1$category1,
-    category2 = temp2$category2
-  )
+    category = Disease.Category,
+    code = Numerical.Codes,
+    consolidated.category = ifelse(category %in% most.prevalent.category, category, "Other")
+  ) %>%
+  select(code, category, consolidated.category)
 
-# Set edge colors - same category or cross-category
-formatted_significant_pairs$edge_color <- ifelse(
-  formatted_significant_pairs$category1 == formatted_significant_pairs$category2, 
-  as.character(formatted_significant_pairs$category1),
-  'Cross-category'
+nodes_info <- data.frame(code = as.integer(V(early_graph)$name)) %>%
+  left_join(modules, by = "code")
+
+V(early_graph)$consolidated.category <- nodes_info$consolidated.category
+
+# 3. Identify singleton nodes
+is_singleton <- function(v) {
+  neighbors_v <- neighbors(early_graph, v)
+  if (length(neighbors_v) == 0) {
+    return(TRUE)
+  }
+  own_category <- V(early_graph)$consolidated.category[v]
+  neighbor_categories <- V(early_graph)$consolidated.category[neighbors_v]
+  all(neighbor_categories != own_category)
+}
+
+singleton_flags <- sapply(V(early_graph), is_singleton)
+
+singleton_node_codes <- as.integer(V(early_graph)$name[singleton_flags])
+
+
+```
+
+```{r}
+disease_code_for_collapsing_groups <- disease_code %>%
+  mutate(module = Numerical.Codes) %>%
+  
+  mutate(module = ifelse(module %in% seq(101, 198) & !(module %in% singleton_node_codes), 1, module)) %>%  # Eye
+  mutate(module = ifelse(module %in% seq(301, 398) & !(module %in% singleton_node_codes), 3, module)) %>%  # Mouth/Dental/Oral
+  mutate(module = ifelse(module %in% seq(401, 497) & !(module %in% singleton_node_codes), 4, module)) %>%  # Skin
+  mutate(module = ifelse(module %in% seq(501, 598) & !(module %in% singleton_node_codes), 5, module)) %>%  # Cardiac
+  mutate(module = ifelse(module %in% seq(601, 698) & !(module %in% singleton_node_codes), 6, module)) %>%  # Respiratory
+  mutate(module = ifelse(module %in% seq(701, 798) & !(module %in% singleton_node_codes), 7, module)) %>%  # Gastrointestinal
+  mutate(module = ifelse(module %in% seq(1101, 1198) & !(module %in% singleton_node_codes), 11, module)) %>%  # Bone/Orthopedic
+  mutate(module = ifelse(module %in% seq(1301, 1398) & !(module %in% singleton_node_codes), 13, module)) %>%  # Endocrine
+  mutate(module = ifelse(module %in% seq(1601, 1697) & !(module %in% singleton_node_codes), 16, module)) %>%  # Infection/Parasites
+  mutate(module = ifelse(module %in% seq(1701, 1798) & !(module %in% singleton_node_codes), 17, module)) %>%  # Toxin Consumption
+  mutate(module = ifelse(module %in% seq(1801, 1897) & !(module %in% singleton_node_codes), 18, module)) %>%  # Trauma
+  
+  mutate(
+    category = Disease.Category,
+    code = Numerical.Codes,
+    consolidated.category = ifelse(category %in% most.prevalent.category, category, "Other")
+  ) %>%
+  select(code, category, consolidated.category, module)
+
+```
+
+```{r}
+# Contract the graph
+gn <- contract(graph, V(graph)$module, vertex.attr.comb=list(
+  name = 'first',
+  category = 'first',
+  prevalence = 'sum',
+  hub = 'first',
+  module = 'ignore',
+  consolidated.category = 'first'
+))
+
+# Dynamically detect number of collapsed groups
+group_module_ids <- c(1, 3, 4, 5, 6, 7, 11, 13, 16, 17, 18)
+
+actual_no_collapsed <- sum(as.integer(V(gn)$name) %in% group_module_ids)
+
+# Assign node types
+V(gn)$type <- c(
+  rep('group', actual_no_collapsed),
+  rep('single', length(V(gn)$name) - actual_no_collapsed)
 )
+```
 
-# Add "Cross-category" to color palette
-edge_color_palette <- c(color_palette, "Cross-category" = "gray50")
 
-# Create the graph
-graph <- formatted_significant_pairs %>% 
-  dplyr::select(Disease1, Disease2, weight, edge_color) %>%
-  graph_from_data_frame(directed = FALSE)
+```{r}
+# Build the graph object
+graph <- formatted_significant_pairs %>%
+  graph_from_data_frame(directed = FALSE) %>%
+  as_tbl_graph(directed = FALSE) %>%
+  activate(nodes)
 
-# Add node attributes
-nodes_data <- data.frame(
-  code = as.integer(V(graph)$name)
-) %>%
-  left_join(modules, by = 'code') %>%
+# Attach attributes to nodes
+nodes.stat <- data.frame(code = as.integer(V(graph)$name)) %>%
+  left_join(disease_code_for_collapsing_groups, by = "code") %>%
   left_join(
     disease_frequencies %>%
       mutate(code = Numerical.Codes) %>%
-      dplyr::select(code, frequency),
-    by = 'code'
+      select(code, frequency, Disease.Name),
+    by = "code"
   )
 
-V(graph)$category <- nodes_data$category
-V(graph)$consolidated_category <- nodes_data$consolidated_category
-V(graph)$module <- nodes_data$module
-V(graph)$disease_name <- nodes_data$Disease.Name
-V(graph)$prevalence <- nodes_data$frequency
-V(graph)$is_group_representative <- V(graph)$name %in% unique(modules$module[modules$module != modules$code])
+V(graph)$consolidated.category <- nodes.stat$consolidated.category
+V(graph)$category <- nodes.stat$category
+V(graph)$module <- as.numeric(as.factor(nodes.stat$module))
+V(graph)$prevalence <- nodes.stat$frequency
 
-# Fix the vertex attribute combination specification for contract
-graph_contracted <- contract(
-  graph, 
-  mapping = match(V(graph)$module, unique(V(graph)$module)),
-  vertex.attr.comb = list(
-    name = function(x) x[1],
-    category = function(x) x[1],
-    consolidated_category = function(x) x[1],
-    module = function(x) x[1],
-    disease_name = function(x) x[1],
-    prevalence = sum,
-    is_group_representative = function(x) any(x)
-  )
+# 🔥 Create hub labels
+V(graph)$hub <- ifelse(
+  V(graph)$category %in% most.prevalent.category,
+  as.character(V(graph)$category),         # Group nodes will be labeled by category
+  as.character(nodes.stat$Disease.Name)     # Singletons will be labeled by specific disease name
 )
 
-# Create node labels
-V(graph_contracted)$label <- sapply(1:vcount(graph_contracted), function(i) {
-  node_code <- as.integer(V(graph_contracted)$name[i])
-  
-  # To this:
-if (V(graph_contracted)$is_group_representative[i]) {
-  # For group nodes, show only category name
-  return(V(graph_contracted)$category[i])
-} else {
-  # For individual nodes, show disease name
-  return(V(graph_contracted)$disease_name[i])
-}
-})
+V(graph)$module[is.na(V(graph)$module)] <- 999
 
-# Set node type (group or individual)
-V(graph_contracted)$type <- ifelse(
-  V(graph_contracted)$is_group_representative,
-  "Category Group",
-  "Individual Condition"
+# Contract the graph
+gn <- contract(graph, V(graph)$module, vertex.attr.comb = list(
+  name = 'first',
+  category = 'first',
+  prevalence = 'sum',
+  hub = 'first',
+  module = 'ignore',
+  consolidated.category = 'first'
+))
+
+# Assign node types
+group_module_ids <- c(1, 3, 4, 5, 6, 7, 11, 13, 16, 17, 18)
+actual_no_collapsed <- sum(as.integer(V(gn)$name) %in% group_module_ids)
+
+V(gn)$type <- c(
+  rep('group', actual_no_collapsed),
+  rep('single', length(V(gn)$name) - actual_no_collapsed)
 )
 
-# Calculate node sizes based on prevalence (with min/max limits)
-max_prevalence <- max(V(graph_contracted)$prevalence)
-min_size <- 3
-max_size <- 12
-V(graph_contracted)$size <- min_size + (V(graph_contracted)$prevalence / max_prevalence) * (max_size - min_size)
+edge_cats <- ends(gn, es = E(gn), names = FALSE)
 
-# Create the visualization with ggraph
-plot <- # With this line:
-plot <- ggraph(graph_contracted, layout = layout_nicely(graph_contracted)) + 
-  # Edges
-  geom_edge_link(
-  aes(color = edge_color),
-  width = 0.5,
-  alpha = 0.6
-) + 
-  scale_edge_width(range = c(0.2, 1.5), guide = "none") +
-  scale_edge_colour_manual(
-    values = edge_color_palette, 
-    name = "Connection Type"
-  ) +
-  # Nodes
-  geom_node_point(
-    aes(
-      color = consolidated_category, 
-      size = prevalence,
-      shape = type
-    )
-  ) +
-  scale_colour_manual(
-    values = color_palette,
-    name = "Disease Category"
-  ) +
-  scale_shape_manual(
-    values = c("Category Group" = 17, "Individual Condition" = 16),
-    name = "Node Type"
-  ) +
-  scale_size_continuous(
-    name = "Prevalence", 
-    range = c(3, 12)
-  ) +
-  # Labels
-  geom_node_text(
-    aes(label = label),
-    repel = TRUE,
-    size = 3,
-    max.overlaps = 20
-  ) +
-  # Styling
-  theme_minimal() +
-  theme(
-    legend.position = "right",
-    legend.box = "vertical",
-    plot.title = element_text(hjust = 0.5, size = 14),
-    plot.subtitle = element_text(hjust = 0.5, size = 10),
-    plot.caption = element_text(hjust = 0, size = 8)
-  ) +
-  labs(
-    title = "Canine Comorbidity Network",
-    subtitle = "Node size represents prevalence; Edge width represents strength of association",
-    caption = paste0("Categories collapsed: ", paste(categories_to_collapse, collapse = ", "), 
-                    "\nSingletons and categories with low internal connectivity are shown individually")
-  )
+# UNLIST to fix list-type error
+category1 <- unlist(V(gn)$consolidated.category[edge_cats[,1]])
+category2 <- unlist(V(gn)$consolidated.category[edge_cats[,2]])
 
-plot
+E(gn)$edge_color <- ifelse(
+  category1 == category2,
+  as.character(category1),
+  "Cross-category"
+)
 
-# Save the plot
-ggsave("canine_comorbidity_network.png", plot, width = 12, height = 10, dpi = 300)
 
-# Print summary statistics
-cat("\n=== NETWORK VISUALIZATION SUMMARY ===\n\n")
-cat("Original network:", vcount(graph), "nodes,", ecount(graph), "edges\n")
-cat("Contracted network:", vcount(graph_contracted), "nodes,", ecount(graph_contracted), "edges\n")
-cat("Categories collapsed:", length(categories_to_collapse), "out of", length(unique(modules$category)), "\n")
-cat("Color palette used for top", length(top_categories), "categories plus 'Other'\n")
+p3 <- ggraph(gn, layout = layout_nicely(gn)) + 
+  geom_edge_link(aes(color = edge_color), alpha = 0.5) +
+  scale_edge_colour_manual(values = all.colors) +
+  geom_node_point(aes(color = consolidated.category, size = prevalence, shape = type)) +
+  scale_colour_manual(values = all.colors) +
+  scale_shape_manual(values = c("group" = 17, "single" = 16)) +
+  geom_node_label(aes(label = hub), repel = TRUE, max.overlaps = Inf, fontface = 'italic') +
+  ggtitle("Contracted Disease Network (layout_nicely)") +
+  theme_minimal()
+
+p3
+
+
+save_plot(p3, filename = "./DAP_network_figures_tables/unstrat_network.png", base_height = 7)
+
 ```
+
