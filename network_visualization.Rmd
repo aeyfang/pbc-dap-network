@@ -245,7 +245,7 @@ categoryLabels <- c(sort(most.prevalent.category), "Other")
 names(all.colors) <- c(categoryLabels,'Cross-category')
 
 # Decide which categories to collapse based on connection ratio
-collapse_threshold <- 0.4  # Categories with ratio > 0.4 will be collapsed
+collapse_threshold <- 0.3  # Categories with ratio > 0.4 will be collapsed
 
 categories_to_collapse <- category_analysis %>%
   filter(ConnectionRatio >= collapse_threshold) %>%
@@ -522,6 +522,14 @@ p3 <- ggraph(g_all, layout = layout) +
 p3
 save_plot("./enhanced_comorbidity_network.png", p3, base_height = 10, base_width = 12)
 ```
+
+
+
+
+
+
+
+
 
 
 
