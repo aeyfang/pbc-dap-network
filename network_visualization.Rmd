@@ -5,21 +5,22 @@ date: "2025-04-29"
 output: html_document
 ---
 ```{r}
+# Load required packages
 library(igraph)
 library(ggraph)
 library(RColorBrewer)
-# display.brewer.all()
 library(cowplot)
 library(dplyr)
 library(purrr)
 theme_set(theme_cowplot())
 edge_percent <- 1
 ```
-
 ```{r}
+# Load data
 disease_frequencies <- read.csv(paste0("./frequency tables/disease_frequencies_", 'unstrat', ".csv"))
-disease_code<-read.csv(file = "./diseaseCodes.csv")
+disease_code <- read.csv(file = "./diseaseCodes.csv")
 
+# Helper function to clean disease names
 clean_disease_name <- function(name) {
   if(startsWith(name, "condition_")) {
     return(sub("^condition_", "", name))
@@ -31,26 +32,43 @@ clean_disease_name <- function(name) {
   }
   return(name)
 }
+
+# Load significant pairs
 significant_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv")
 formatted_significant_pairs <- significant_pairs %>%
   transmute(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
-  ) 
-
-class(formatted_significant_pairs$Disease1)
-
-most.prevalent.category <- c('Brain/Neurologic', 
-                             'Cancer',
-                             'Kidney/Urinary',
-                             'Cardiac', 
-                             'Gastrointestinal',
-                             'Ear/Nose/Throat',
-                             'Skin','Eye','Liver/Pancreas'
-                              )
+  )
 ```
-
 ```{r}
+
+# Define categories of interest
+most.prevalent.category <- c('Brain/Neurologic', 
+                           'Cancer',
+                           'Kidney/Urinary',
+                           'Cardiac', 
+                           'Gastrointestinal',
+                           'Ear/Nose/Throat',
+                           'Skin','Eye','Liver/Pancreas'
+                           )
+
+# Define key disease pairs discussed in the manuscript
+key_disease_pairs <- list(
+  c(1307, 101),  # Diabetes and blindness
+  c(405, 412),   # Atopic dermatitis and allergies
+  c(1305, 404),  # Cushing's disease and alopecia
+  c(514, 908),   # Hypertension and chronic kidney disease
+  c(911, 1407),  # Proteinuria and anemia
+  c(1307, 102)   # Diabetes and cataracts (temporal relationship)
+)
+
+# Additional connections from ear infections (node 202)
+ear_infection_connections <- c(405, 407, 412, 426, 205, 104)
+
+# Create a flattened list of all key nodes
+key_nodes <- unique(c(unlist(key_disease_pairs), 202, ear_infection_connections))
+
 # Function to identify singletons in each category
 identify_singletons <- function(disease_pairs, disease_codes) {
   # Convert disease IDs to clean numerical codes
@@ -139,22 +157,10 @@ identify_singletons <- function(disease_pairs, disease_codes) {
 
 # Use the function to identify singletons
 singleton_results <- identify_singletons(significant_pairs, disease_code)
-
-# Print summary of singletons found
-cat("Identified singletons by category:\n")
-for (category in names(singleton_results)) {
-  singletons <- singleton_results[[category]] %>% filter(is_singleton == TRUE)
-  if (nrow(singletons) > 0) {
-    cat(sprintf("- Category '%s': %d singletons found\n", category, nrow(singletons)))
-    for (i in 1:nrow(singletons)) {
-      cat(sprintf("  * %s (code %d): %d external connections\n", 
-                 singletons$name[i], singletons$code[i], singletons$external[i]))
-    }
-  }
-}
 ```
 
 ```{r}
+
 # Function to analyze category connectivity patterns
 analyze_category_connectivity <- function(disease_pairs, disease_codes) {
   # Convert disease IDs to clean numerical codes
@@ -233,35 +239,13 @@ analyze_category_connectivity <- function(disease_pairs, disease_codes) {
 # Use the function to analyze category connectivity
 category_analysis <- analyze_category_connectivity(significant_pairs, disease_code)
 
-# Print the results
-print(category_analysis)
-
-# Plot the results for visual interpretation
-library(ggplot2)
-ggplot(category_analysis, aes(x = reorder(Category, -ConnectionRatio), y = ConnectionRatio)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  geom_text(aes(label = sprintf("%.2f", ConnectionRatio)), vjust = -0.5, size = 3) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(title = "Internal Connection Ratio by Disease Category",
-       subtitle = "Higher values suggest categories that should be collapsed",
-       x = "Disease Category",
-       y = "Internal Connection Ratio") +
-  ylim(0, 1)
-```
-
-
-```{r}
-# all.colors <- brewer.pal(8,'Dark2')
+# Set colors for categories
 all.colors <- brewer.pal(length(most.prevalent.category)+2, 'Paired')
 categoryLabels <- c(sort(most.prevalent.category), "Other")
 names(all.colors) <- c(categoryLabels,'Cross-category')
 
-#head(disease_code[disease_code$Disease.Category=='Respiratory',])
-
 # Decide which categories to collapse based on connection ratio
-# This is an evidence-based approach rather than manual selection
-collapse_threshold <- 0.4  # Categories with ratio > 0.5 will be collapsed
+collapse_threshold <- 0.4  # Categories with ratio > 0.4 will be collapsed
 
 categories_to_collapse <- category_analysis %>%
   filter(ConnectionRatio >= collapse_threshold) %>%
@@ -271,42 +255,11 @@ categories_to_keep_separate <- category_analysis %>%
   filter(ConnectionRatio < collapse_threshold) %>%
   pull(Category)
 
-cat("Categories to collapse (", length(categories_to_collapse), "):\n", 
-    paste(categories_to_collapse, collapse = ", "), "\n\n")
-
-cat("Categories to keep as individual diseases (", length(categories_to_keep_separate), "):\n", 
-    paste(categories_to_keep_separate, collapse = ", "), "\n")
-
-# collapse groups of diseases by category (may exclude the Other within each category as they sometimes behave differently)
-# the variable `module` will be used as a mapping to contract the graph
+# Modify the modules structure to exclude key nodes from collapsing
 disease_code_for_collapsing_groups <- disease_code %>%
-  mutate(module = Numerical.Codes) %>%
-  mutate(module = ifelse(module %in% seq(101,198), 1, module)) %>% # Eye
-  mutate(module = ifelse(module %in% seq(301,398), 3, module)) %>% # Mouth/Dental/Oral
-  mutate(module = ifelse(module %in% seq(401,497), 4, module)) %>% # Skin
-  mutate(module = ifelse(module %in% seq(501,598), 5, module)) %>% # Cardiac
-  mutate(module = ifelse(module %in% seq(601,698), 6, module)) %>% # Respiratory
-  mutate(module = ifelse(module %in% seq(701,798), 7, module)) %>% # Gastrointestinal
-  mutate(module = ifelse(module %in% seq(1101,1198), 11, module)) %>% # Bone/Orthopedic
-  mutate(module = ifelse(module %in% seq(1301,1398), 13, module)) %>% # Endocrine
-  mutate(module = ifelse(module %in% seq(1601,1697), 16, module)) %>% # Infection/Parasites
-  mutate(module = ifelse(module %in% seq(1701,1798), 17, module)) %>% # Toxin Consumption
-  mutate(module = ifelse(module %in% seq(1801,1897), 18, module)) # Trauma
-  
-no.collapsed <- 11
-modules <- disease_code_for_collapsing_groups %>%
-  mutate('category' = Disease.Category) %>%
-  mutate('code' = Numerical.Codes) %>%
-  mutate('X' = NULL) %>%
-  mutate("Numerical.Codes" = NULL) %>%
-  mutate("Disease.Category" = NULL) %>%
-  mutate('consolidated.category' = ifelse(category %in% most.prevalent.category, category, 'Other'))
+  mutate(module = Numerical.Codes)
 
-# Reset the modules structure based on our analysis
-disease_code_for_collapsing_groups <- disease_code %>%
-  mutate(module = Numerical.Codes)  # Start with no collapsing
-
-# For each category to collapse, set the module to a category-specific value
+# For each category to collapse, set the module
 for (category in categories_to_collapse) {
   # Find all diseases in this category
   category_diseases <- disease_code %>%
@@ -319,22 +272,13 @@ for (category in categories_to_collapse) {
     prefix <- substr(first_code, 1, nchar(first_code) - 2)
     
     # Group these diseases by setting their module to a common value
-    # We'll use the first two digits of the code as the module
     disease_code_for_collapsing_groups <- disease_code_for_collapsing_groups %>%
-      mutate(module = ifelse(Disease.Category == category, 
+      mutate(module = ifelse(Disease.Category == category & 
+                            !(Numerical.Codes %in% key_nodes),  # Exclude key nodes from collapsing
                             as.numeric(paste0(prefix, "00")), 
                             module))
   }
 }
-
-# Don't forget to handle singletons separately
-# (Use the singleton detection code from previous step)
-
-# Start with evidence-based category decisions
-# (code from steps 2-3 above)
-
-# Then handle singletons as exceptions
-singleton_results <- identify_singletons(significant_pairs, disease_code)
 
 # For categories that we decided to collapse, check for singletons
 for (category in categories_to_collapse) {
@@ -353,198 +297,232 @@ for (category in categories_to_collapse) {
   }
 }
 
-# g <- graph_from_data_frame(formatted_significant_pairs, directed = F)
-# g
-# nodes.stat <- data.frame(code=as.integer(V(g)$name)) %>% 
-#   left_join(modules, by = 'code')
-# V(g)$module <- as.numeric(as.factor(nodes.stat$module))
-# V(g)$category <- nodes.stat$consolidated.category
-# gn <- contract(g, V(g)$module, vertex.attr.comb=toString)
-# V(gn)$category[1:5] <- c('Skin','Other',"Bone/Orthopedic",'Trauma','Infection/Parasites')
-# p <- ggraph(gn) + 
-#   geom_edge_link(aes(alpha=0.5), color='grey') + 
-#   geom_node_point(aes(color=category))  +
-#   scale_colour_manual(values=all.colors) 
-# p
+```
 
-# get the hub diseases from g
-# This is just one way of creating labels for a subset of the nodes. We could 
-#  also only label diseases for which we would like to highlight, or based on overall prevalence
-# hub_diseases <- V(g)$name[degree(g) >= 10]
+```{r}
 
-## a simple graph ----
-graph <- formatted_significant_pairs %>% 
-  igraph::graph_from_data_frame(directed = F) %>% 
-  tidygraph::as_tbl_graph(directed=FALSE) %>% 
-  tidygraph::activate(nodes) 
-
-nodes.stat <- data.frame(code=as.integer(V(graph)$name)) %>% 
-  left_join(modules, by = 'code') %>%
-  left_join(disease_frequencies %>%
-              mutate(code=Numerical.Codes) %>%
-              mutate(Disease.Category = NULL),
-            by = 'code')
-
-V(graph)$category <- nodes.stat$consolidated.category
-V(graph)$prevalence <- nodes.stat$frequency
-
-# make the plot with gggraph
-p <- ggraph(graph) + 
-  geom_edge_link(aes(alpha=0.5), color='grey') + 
-  geom_node_point(aes(color=category)) +
-  geom_node_label(aes(label=name), repel=TRUE, max.overlaps=Inf, fontface='italic') 
-p
-
-
-## update figure to be more informative ----
-formatted_significant_pairs <- significant_pairs %>%
-  transmute(
-    Disease1 = map_chr(Disease1, clean_disease_name),
-    Disease2 = map_chr(Disease2, clean_disease_name),
-    weight = AdjustedPValue
-  ) %>%
-  mutate(Disease1 = as.integer(Disease1)) %>%
-  mutate(Disease2 = as.integer(Disease2))
-
-# get the module & color info for gene1
-temp1 <- dplyr::inner_join(
-  formatted_significant_pairs,
-  modules %>% 
-    dplyr::select(c(code, consolidated.category)) %>% 
-    dplyr::rename(Disease1 = code, category1=consolidated.category),
-  by = 'Disease1'
-) %>% dplyr::select(category1)
-
-# get the module & color info for gene2
-temp2 <- dplyr::inner_join(
-  formatted_significant_pairs,
-  modules %>% 
-    dplyr::select(c(code, consolidated.category)) %>% 
-    dplyr::rename(Disease2 = code, category2=consolidated.category),
-  by = 'Disease2'
-) %>% dplyr::select(category2)
-
-# add the module & color info 
-formatted_significant_pairs <- cbind(formatted_significant_pairs, temp1, temp2)
-
-# set the edge color to the module's color if they are the two genes are in the same module 
-formatted_significant_pairs$edge_color <- ifelse(
-  formatted_significant_pairs$category1 == formatted_significant_pairs$category2, 
-  as.character(formatted_significant_pairs$category1),
-  'Cross-category'
-)
-
-# keep this network before subsetting
-formatted_significant_pairs_full <- formatted_significant_pairs 
-
-# keep the top edge_percent of edges 
-formatted_significant_pairs <- formatted_significant_pairs_full %>% 
-  # subset(category1!=category2) %>%
-  dplyr::slice_min(
-    order_by = weight, 
-    n = round(nrow(formatted_significant_pairs)*edge_percent)
-  )
-
-# make the graph object with tidygraph
-graph <- formatted_significant_pairs %>% 
-  igraph::graph_from_data_frame() %>%
-  tidygraph::as_tbl_graph(directed=FALSE) %>% 
-  tidygraph::activate(nodes)
-
-# add the module name to the graph:
-nodes.stat <- data.frame(code=as.integer(V(graph)$name)) %>% 
-  left_join(modules, by = 'code') %>%
-  left_join(disease_frequencies %>%
-              mutate(code=Numerical.Codes) %>%
-              mutate(Disease.Category = NULL),
-            by = 'code')
-
-V(graph)$consolidated.category <- nodes.stat$consolidated.category
-V(graph)$category <- nodes.stat$category
-V(graph)$prevalence <- nodes.stat$frequency
-V(graph)$hub <- ifelse(V(graph)$category %in% c('Skin','Eye','Gastrointestinal','Cardiac',
-                                                'Mouth/Dental/Oral','Respiratory','Bone/Orthopedic',
-                                                'Infection/Parasites','Trauma','Toxin Consumption',
-                                                'Endocrine'), nodes.stat$category, nodes.stat$Disease.Name.x)
-V(graph)$module <- as.numeric(as.factor(nodes.stat$module))
-# E(graph)$weight <- E(graph)$weight + 1.502132e-12
-
-p2 <- ggraph(graph, layout=layout_nicely(graph)) + 
-  geom_edge_link(aes(color=edge_color)) + 
-  scale_edge_colour_manual(values=all.colors) +
-  geom_node_point(aes(color=consolidated.category, size=prevalence)) +
-  scale_colour_manual(values=all.colors) +
-  # geom_node_label(aes(label=hub), repel=TRUE, max.overlaps=Inf, fontface='italic') +
-  ggtitle("layout_nicely()") 
-
-p2
-
-
-# Create the modules structure with the optimized strategy
+# Create modules structure for graph
 modules <- disease_code_for_collapsing_groups %>%
   mutate('category' = Disease.Category) %>%
   mutate('code' = Numerical.Codes) %>%
   mutate('X' = NULL) %>%
   mutate("Numerical.Codes" = NULL) %>%
   mutate("Disease.Category" = NULL) %>%
-  mutate('consolidated.category' = ifelse(category %in% most.prevalent.category, 
-                                         category, 'Other'))
+  mutate('consolidated.category' = ifelse(category %in% most.prevalent.category, category, 'Other'))
 
-# The rest of the visualization code remains similar, but with improved labels
-# for the collapsed categories
-# ...
+# Add marker for key nodes
+modules <- modules %>%
+  mutate(is_key_node = code %in% key_nodes)
 
-# Create the contracted graph
-gn <- contract(graph, V(graph)$module, vertex.attr.comb=list(
-  name = 'first',
-  category = 'first',
-  prevalence = 'sum',
-  hub = 'first',
-  module = 'ignore',
-  consolidated.category = 'first'
-))
+# Now we'll create THREE separate edge sets for our visualization
+# 1. Regular edges that will be thin and gray
+# 2. Key comorbidity edges that will be red and thick
+# 3. Ear infection edges that will be blue and thick
 
-# Determine which nodes are groups vs individual diseases
-# We need to manually add the 'type' attribute after contraction
-group_modules <- unique(disease_code_for_collapsing_groups$module[
-  disease_code_for_collapsing_groups$module != disease_code_for_collapsing_groups$Numerical.Codes
-])
+# Prepare edges with original disease pairs
+edge_df <- significant_pairs %>%
+  transmute(
+    from = map_chr(Disease1, clean_disease_name),
+    to = map_chr(Disease2, clean_disease_name)
+  )
 
-# Add type attribute - mark nodes as either 'group' or 'single'
-V(gn)$type <- "single"  # Default all to single
-for (i in 1:length(V(gn)$name)) {
-  node_name <- as.integer(V(gn)$name[i])
-  if (node_name %in% group_modules) {
-    V(gn)$type[i] <- "group"
+# Identify the modules for each disease
+edge_df$from_module <- sapply(as.numeric(edge_df$from), function(code) {
+  row <- which(modules$code == code)
+  if (length(row) > 0) modules$module[row] else code
+})
+
+edge_df$to_module <- sapply(as.numeric(edge_df$to), function(code) {
+  row <- which(modules$code == code)
+  if (length(row) > 0) modules$module[row] else code
+})
+
+# Create the regular edge set (between modules)
+regular_edges <- edge_df %>%
+  dplyr::select(from_module, to_module) %>%
+  distinct() %>%
+  dplyr::rename(from = from_module, to = to_module)
+
+# Create the key comorbidity edge set
+key_comorbidity_edges <- data.frame(
+  from = character(),
+  to = character(),
+  stringsAsFactors = FALSE
+)
+
+for (pair in key_disease_pairs) {
+  # Get the modules for these diseases
+  node1 <- as.character(pair[1])
+  node2 <- as.character(pair[2])
+  
+  # Check if we have both nodes and they have distinct modules
+  if (node1 %in% as.character(modules$code) && node2 %in% as.character(modules$code)) {
+    # Add this edge to the key comorbidity set
+    key_comorbidity_edges <- rbind(key_comorbidity_edges, 
+                                data.frame(from = node1, to = node2, stringsAsFactors = FALSE))
   }
 }
 
-# Now create the informative labels
-for (i in 1:length(V(gn)$name)) {
-  if (V(gn)$type[i] == "group") {
-    category <- V(gn)$consolidated.category[i]
-    # Make sure category exists in category_analysis
-    if (category %in% category_analysis$Category) {
-      count <- category_analysis$DiseaseCount[category_analysis$Category == category]
-      V(gn)$hub[i] <- paste0(category, "\n(", count, " diseases)")
-    } else {
-      # Fallback if category isn't found
-      V(gn)$hub[i] <- category
-    }
-  }
+# Create the ear infection edge set
+ear_infection_edges <- data.frame(
+  from = character(),
+  to = character(),
+  stringsAsFactors = FALSE
+)
+
+for (conn_node in ear_infection_connections) {
+  # Add this edge to the ear infection set
+  ear_infection_edges <- rbind(ear_infection_edges, 
+                             data.frame(from = "202", to = as.character(conn_node), 
+                                      stringsAsFactors = FALSE))
 }
 
-p3 <- ggraph(gn, layout=layout_nicely(gn)) + 
-  geom_edge_link(aes(color=edge_color)) + 
-  scale_edge_colour_manual(values=all.colors) +
-  geom_node_point(aes(color=consolidated.category, size=prevalence, shape = type)) +
-  scale_colour_manual(values=all.colors) +
-  scale_shape_manual(values = my.shapes) +
-  geom_node_label(aes(label=hub), repel=TRUE, max.overlaps=Inf, fontface='italic') +
-  ggtitle("layout_nicely()") 
-# NoLegend()
+# Before creating node_attr, add this code to ensure unique names
+all_nodes <- unique(c(regular_edges$from, regular_edges$to, 
+                    key_comorbidity_edges$from, key_comorbidity_edges$to,
+                    ear_infection_edges$from, ear_infection_edges$to))
 
-p3
+# Create node dataframe with unique names
+node_attr <- data.frame(
+  name = all_nodes,
+  stringsAsFactors = FALSE
+) %>% distinct(name, .keep_all = TRUE)  # Ensure names are unique
 
-save_plot(p3, file="../DAP_network_figures_tables/unstrat_network.png", base_height = 7)
+# Add attributes to nodes
+node_attr$is_key_node <- node_attr$name %in% c(unlist(key_disease_pairs), "202", ear_infection_connections)
+node_attr$code <- as.numeric(node_attr$name)
+
+# Add category and other attributes
+node_attr <- node_attr %>%
+  left_join(modules %>% 
+             dplyr::select(module, category, consolidated.category, is_key_node) %>%
+             dplyr::rename(code = module),
+           by = "code")
+
+# Add prevalence
+node_attr <- node_attr %>%
+  left_join(disease_frequencies %>%
+             mutate(code = Numerical.Codes) %>%
+             dplyr::select(code, frequency),
+           by = "code")
+
+# Add label
+node_attr$label <- sapply(node_attr$code, function(code) {
+  if (code %in% key_nodes) {
+    # For key nodes, show the disease name
+    row <- which(disease_code$Numerical.Codes == code)
+    if (length(row) > 0) disease_code$Disease.Name[row] else paste0("Condition ", code)
+  } else if (code %in% unique(modules$module[modules$code != modules$module])) {
+    # For category nodes, show the category
+    first_disease <- modules$code[modules$module == code][1]
+    category_row <- which(disease_code$Numerical.Codes == first_disease)
+    if (length(category_row) > 0) disease_code$Disease.Category[category_row] else paste0("Category ", code)
+  } else {
+    # For individual disease nodes, show the disease name
+    row <- which(disease_code$Numerical.Codes == code)
+    if (length(row) > 0) disease_code$Disease.Name[row] else paste0("Condition ", code)
+  }
+})
+
+
+# Create a single edge dataframe with a 'type' column
+all_edges <- rbind(
+  transform(regular_edges, type = "regular"),
+  transform(key_comorbidity_edges, type = "key_comorbidity"),
+  transform(ear_infection_edges, type = "ear_infection")
+)
 ```
+
+```{r}
+# Create the graph directly from this combined edge list
+g_all <- graph_from_data_frame(all_edges, directed = FALSE)
+
+# Add node attributes directly to the graph
+V(g_all)$is_key_node <- V(g_all)$name %in% c(as.character(unlist(key_disease_pairs)), "202", as.character(ear_infection_connections))
+V(g_all)$code <- as.numeric(V(g_all)$name)
+V(g_all)$consolidated.category <- sapply(V(g_all)$code, function(code) {
+  row <- which(modules$module == code)
+  if (length(row) > 0) modules$consolidated.category[row[1]] else "Other"
+})
+
+# Add prevalence
+V(g_all)$frequency <- sapply(V(g_all)$code, function(code) {
+  row <- which(disease_frequencies$Numerical.Codes == code)
+  if (length(row) > 0) disease_frequencies$frequency[row] else 1
+})
+
+# Add labels
+V(g_all)$label <- sapply(V(g_all)$code, function(code) {
+  if (code %in% key_nodes) {
+    # For key nodes, show the disease name
+    row <- which(disease_code$Numerical.Codes == code)
+    if (length(row) > 0) disease_code$Disease.Name[row] else paste0("Condition ", code)
+  } else if (code %in% unique(modules$module[modules$code != modules$module])) {
+    # For category nodes, show the category
+    first_disease <- modules$code[modules$module == code][1]
+    category_row <- which(disease_code$Numerical.Codes == first_disease)
+    if (length(category_row) > 0) disease_code$Disease.Category[category_row] else paste0("Category ", code)
+  } else {
+    # For individual disease nodes, show the disease name
+    row <- which(disease_code$Numerical.Codes == code)
+    if (length(row) > 0) disease_code$Disease.Name[row] else paste0("Condition ", code)
+  }
+})
+
+# Calculate a nice layout
+set.seed(123)  # For reproducibility
+layout <- layout_with_fr(g_all)
+
+# Create the visualization using ggraph but without filtering
+p3 <- ggraph(g_all, layout = layout) + 
+  # Draw all edges, colored by type
+  geom_edge_link(aes(color = type, width = type, alpha = type)) +
+  scale_edge_color_manual(values = c(
+    "regular" = "gray70",
+    "key_comorbidity" = "#FF4500",
+    "ear_infection" = "#4169E1"
+  )) +
+  scale_edge_width_manual(values = c(
+    "regular" = 0.4,
+    "key_comorbidity" = 1.2,
+    "ear_infection" = 1.2
+  )) +
+  scale_edge_alpha_manual(values = c(
+    "regular" = 0.3,
+    "key_comorbidity" = 0.9,
+    "ear_infection" = 0.9
+  )) +
+  # Node styling
+  geom_node_point(aes(color = consolidated.category, 
+                     size = ifelse(is_key_node, 8, 
+                                 ifelse(frequency > 500, 6, 
+                                       ifelse(frequency > 100, 4, 3))))) +
+  # Label all nodes 
+  geom_node_text(aes(label = label), 
+                repel = TRUE, 
+                size = ifelse(V(g_all)$is_key_node, 3.5, 2.5),
+                fontface = ifelse(V(g_all)$is_key_node, "bold", "plain")) +
+  # Node colors by category
+  scale_colour_manual(values = all.colors) +
+  # Clean up theme
+  theme_void() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 10)
+  ) +
+  labs(
+    title = "Canine Comorbidity Network",
+    subtitle = "Key disease relationships highlighted and shown as individual nodes",
+    color = "Disease Category",
+    edge_color = "Connection Type"
+  )
+
+# Display and save
+p3
+save_plot("./enhanced_comorbidity_network.png", p3, base_height = 10, base_width = 12)
+```
+
+
+
+
