@@ -24,6 +24,9 @@ load.Rdata(filename="./DAP_2021_HLES_health_conditions_v1.0.RData", objname = "h
 load.Rdata(filename = "./DAP_2021_HLES_cancer_conditions_v1.0.RData", objname = "cancer_condition")
 load.Rdata(filename = "./DAP_2021_HLES_dog_owner_v1.0.RData", objname = "dog_owner")
 
+# Load crosswalk between DAP disease codes and numerical codes
+# This file is found in the GitHub repo
+disease_code <- read.csv(file = "./diseaseCodes.csv", row.names = NULL)
 ```
 
 ```{r data processing and merging}
@@ -116,18 +119,30 @@ health_condition_wide <- health_condition %>%
     names_prefix = "condition_",
     values_from = present,
     values_fill = 0  # Fill missing values with 0 (condition not present)
-  ) %>%
+  ) 
+
+# Consolidate IVDD entries
+health_condition_wide <- health_condition_wide %>%
   mutate(
-    condition_1207 = if_else(condition_1207 == 1 | condition_1108 == 1, 1, 0),
-    condition_1108 = NULL # Consolidate IVDD columns
+    condition_1210 = if_else(
+      (if("condition_1207" %in% names(.)) condition_1210 else 0) == 1 |
+      (if("condition_1108" %in% names(.)) condition_1111 else 0) == 1,
+      1, 0
+    )
   ) %>%
+  dplyr::select(-condition_1111)
+
+# Consolidate fracture entries
+health_condition_wide <- health_condition_wide %>%
   mutate(
-    condition_1804 = if_else(rowSums(select(., condition_1804:condition_1808)) > 0, 1, 0),
-    condition_1805 = NULL,
-    condition_1806 = NULL,
-    condition_1807 = NULL,
-    condition_1808 = NULL # Consolidate fracture entries
+    condition_1804 = if_else(
+      rowSums(select(., starts_with("condition_180")), na.rm = TRUE) > 0,
+      1, 0
+    )
   ) %>%
+  dplyr::select(-starts_with("condition_180"), condition_1804)
+
+health_condition_wide <- health_condition_wide %>%
   mutate(across(everything(), ~replace_na(., 0))) %>%
   {
     # Ensure condition columns are in numerical order
@@ -206,10 +221,6 @@ walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned,
 ```{r generate disease frequency tables}
 # Function to create frequency counts for all diseases in dataset
 generate_frequency_table <- function(data, suffix = "") {
-  # Update condition name for fracture code 1804
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1804"] <- "Fractured bone"
-  # Update condition name for IVDD code 1207
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1207"] <- "Intervertebral disk disease (IVDD)"
   # Count occurrences of each disease
   raw_disease_counts <- data %>%
     dplyr::select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
@@ -222,6 +233,12 @@ generate_frequency_table <- function(data, suffix = "") {
     inner_join(raw_disease_counts, by = c("Code.from.DAP.data" = "code")) %>%
     dplyr::select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency') %>%
     arrange(desc(frequency))
+  
+  # Update condition name for fracture code 1804
+  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1804"] <- "Fractured bone"
+  
+  # Update condition name for IVDD code 1207
+  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1207"] <- "Intervertebral disk disease (IVDD)"
   
   # Save frequency table to CSV
   write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
