@@ -22,10 +22,6 @@ dir.create("./pair stats", showWarnings = FALSE, recursive = TRUE)
 dir.create("./Cytoscape inputs", showWarnings = FALSE, recursive = TRUE)
 dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 
-# Clear workspace and reset environment
-rm(list = ls())
-gc()
-
 # IMPORTANT: Set this to specify which dataset to analyze
 # Options:
 # - "unstrat" (for the complete, unstratified dataset)
@@ -33,7 +29,7 @@ gc()
 #
 # NOTE: This script must be run separately for each dataset to generate all networks.
 # The outputs from data_cleaning.Rmd provide the input files for each stratum.
-analysis_type <- "mature_adult"
+analysis_type <- "unstrat"
 ```
 
 ```{r data loading}
@@ -53,7 +49,7 @@ disease_crosswalk <- disease_frequencies %>%
       TRUE ~ paste0("condition_", Numerical.Codes)
     )
   ) %>%
-  dplyr::select(Code, Disease.Name, Numerical.Codes)
+  dplyr::select(Code, Disease.Name, Numerical.Codes, Disease.Category)
 
 # Separate predictors (demographic variables used in regression models)
 predictors <- data %>%
@@ -109,12 +105,28 @@ coef_pvalue_df <- bind_rows(
   imap(model_results, ~mutate(.x, Disease = .y))
 )
 
+# Extract all p-values for adjustment
+all_pvalues <- coef_pvalue_df %>%
+  dplyr::select(Disease, Term, P_value) %>%
+  # Create unique identifier for each test
+  mutate(test_id = paste(Disease, Term, sep = "_"))
+
+# Apply multiple testing correction
+all_pvalues$P_adjusted <- p.adjust(all_pvalues$P_value, method = "BH")  # BH for Benjamini-Hochberg
+
+# Rejoin with the original data
+coef_pvalue_df <- coef_pvalue_df %>%
+  left_join(
+    all_pvalues %>% dplyr::select(Disease, Term, P_adjusted),
+    by = c("Disease", "Term")
+  )
+
 # Convert to wide format with coefficients and p-values
 coef_pvalue_wide <- coef_pvalue_df %>%
   pivot_wider(
     id_cols = Disease,
     names_from = Term,
-    values_from = c(Coefficient, P_value),
+    values_from = c(Coefficient, P_value, P_adjusted),
     names_glue = "{Term}_{.value}"
   )
 
@@ -140,6 +152,77 @@ coef_df_named <- coef_df %>%
 write.csv(coef_df_named,
           paste0("./model coefficients/coef_only_", analysis_type, ".csv"),
           row.names = FALSE)
+```
+
+```{r analyze_model_coefficients}
+# Calculate statistics on model coefficient directions and significance
+# This produces summary counts and percentages for each covariate
+
+# Extract relevant columns from the coefficient results
+coefficient_stats <- coef_pvalue_df %>%
+  filter(Term != "(Intercept)") %>%  # Remove intercept terms
+  mutate(
+    # Create categories for direction and significance
+    coef_category = case_when(
+      Coefficient > 0 & P_value < 0.05 ~ "positive_significant",
+      Coefficient > 0 & P_value >= 0.05 ~ "positive_nonsignificant",
+      Coefficient < 0 & P_value < 0.05 ~ "negative_significant",
+      Coefficient < 0 & P_value >= 0.05 ~ "negative_nonsignificant",
+      TRUE ~ "zero_or_NA"
+    ),
+    # Binary flags for various conditions
+    is_significant = P_value < 0.05,
+    is_positive = Coefficient > 0,
+    is_negative = Coefficient < 0
+  )
+
+# Summarize across all covariates
+overall_stats <- coefficient_stats %>%
+  summarise(
+    total_coefficients = n(),
+    positive_significant = sum(coef_category == "positive_significant"),
+    positive_nonsignificant = sum(coef_category == "positive_nonsignificant"),
+    negative_significant = sum(coef_category == "negative_significant"),
+    negative_nonsignificant = sum(coef_category == "negative_nonsignificant"),
+    total_significant = sum(is_significant),
+    significant_positive_percent = round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2)
+  ) %>%
+  mutate(
+    positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
+    positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
+    negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
+    negative_nonsignificant_percent = round(negative_nonsignificant / total_coefficients * 100, 2),
+    total_significant_percent = round(total_significant / total_coefficients * 100, 2)
+  )
+
+# Calculate statistics for each covariate separately
+per_covariate_stats <- coefficient_stats %>%
+  group_by(Term) %>%
+  summarise(
+    total_coefficients = n(),
+    positive_significant = sum(coef_category == "positive_significant"),
+    positive_nonsignificant = sum(coef_category == "positive_nonsignificant"),
+    negative_significant = sum(coef_category == "negative_significant"),
+    negative_nonsignificant = sum(coef_category == "negative_nonsignificant"),
+    total_significant = sum(is_significant),
+    significant_positive_percent = if(sum(is_significant) > 0) 
+                                    round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2) 
+                                  else 0
+  ) %>%
+  mutate(
+    positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
+    positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
+    negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
+    negative_nonsignificant_percent = round(negative_nonsignificant / total_coefficients * 100, 2),
+    total_significant_percent = round(total_significant / total_coefficients * 100, 2)
+  )
+
+# Print the results
+cat("Overall coefficient statistics:\n")
+print(overall_stats)
+
+cat("\nPer-covariate statistics:\n")
+print(per_covariate_stats)
 ```
 
 ```{r calculate individual disease probabilities}
