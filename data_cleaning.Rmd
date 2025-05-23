@@ -125,8 +125,8 @@ health_condition_wide <- health_condition %>%
 health_condition_wide <- health_condition_wide %>%
   mutate(
     condition_1210 = if_else(
-      (if("condition_1207" %in% names(.)) condition_1210 else 0) == 1 |
-      (if("condition_1108" %in% names(.)) condition_1111 else 0) == 1,
+      (if("condition_1210" %in% names(.)) condition_1210 else 0) == 1 |
+      (if("condition_1111" %in% names(.)) condition_1111 else 0) == 1,
       1, 0
     )
   ) %>%
@@ -136,11 +136,11 @@ health_condition_wide <- health_condition_wide %>%
 health_condition_wide <- health_condition_wide %>%
   mutate(
     condition_1804 = if_else(
-      rowSums(select(., starts_with("condition_180")), na.rm = TRUE) > 0,
+      rowSums(select(., condition_1804:condition_1808), na.rm = TRUE) > 0,
       1, 0
     )
   ) %>%
-  dplyr::select(-starts_with("condition_180"), condition_1804)
+  select(-condition_1805, -condition_1806, -condition_1807, -condition_1808)
 
 health_condition_wide <- health_condition_wide %>%
   mutate(across(everything(), ~replace_na(., 0))) %>%
@@ -237,8 +237,8 @@ generate_frequency_table <- function(data, suffix = "") {
   # Update condition name for fracture code 1804
   disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1804"] <- "Fractured bone"
   
-  # Update condition name for IVDD code 1207
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1207"] <- "Intervertebral disk disease (IVDD)"
+  # Update condition name for IVDD code 1210
+  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1210"] <- "Intervertebral disk disease (IVDD)"
   
   # Save frequency table to CSV
   write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)

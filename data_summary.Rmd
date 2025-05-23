@@ -78,7 +78,7 @@ ggsave("./summary statistics/weight_distribution.png", weight_histogram,
 # This table summarizes sex, breed, age, and weight distributions
 
 table1 <- cleaned_without_healthy_dogs %>%
-  select(recode.sex_2, recode.sex_3, recode.sex_4, dd_breed_pure_or_mixed, dd_age_years, dd_weight_lbs) %>%
+  dplyr::select(recode.sex_2, recode.sex_3, recode.sex_4, dd_breed_pure_or_mixed, dd_age_years, dd_weight_lbs) %>%
   mutate(
     # Create readable sex categories based on the coded values
     sex = case_when(
@@ -90,11 +90,11 @@ table1 <- cleaned_without_healthy_dogs %>%
     # Create readable breed categories
     breed = ifelse(dd_breed_pure_or_mixed == 0, "Purebred", "Mixed breed")
   ) %>%
-  select(sex, breed, dd_age_years, dd_weight_lbs) %>%
+  dplyr::select(sex, breed, dd_age_years, dd_weight_lbs) %>%
   tbl_summary(
     by = NULL,
     statistic = list(
-      all_categorical() ~ "{n} ({p}%)",
+      all_categorical() ~ "{n} ({p}%.2f)",  # Change formatting to include 2 decimal places
       all_continuous() ~ "{median} [{p25}, {p75}]"
     ),
     label = list(
@@ -104,19 +104,12 @@ table1 <- cleaned_without_healthy_dogs %>%
       dd_weight_lbs ~ "Weight (lbs)"
     ),
     digits = list(
-      all_categorical() ~ c(0, 0),
-      all_continuous() ~ 1
+      all_categorical() ~ c(0, 2),  # Set decimal places for categorical variables to 2
+      all_continuous() ~ 2
     )
   ) %>%
-  modify_header(label = "**Characteristic**") %>%
-  modify_table_body(
-    ~.x %>%
-      mutate(stat_0 = if_else(
-        variable == "sex" & label == "Female, spayed",
-        gsub("47%", "46%", stat_0), # Correct rounding error
-        stat_0
-      ))
-  )
+  modify_header(label = "**Characteristic**")
+  # Removed the modify_table_body section that contained the special case
 
 # Display the table
 print(table1)
@@ -207,6 +200,25 @@ total_diseases_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = total_d
     axis.text = element_text(size = 12)
   )
 
+# Calculate dogs with ≤2 diseases and ≥3 diseases
+dogs_two_or_less <- cleaned_without_healthy_dogs %>% 
+  filter(total_diseases <= 2) %>% 
+  nrow()
+  
+dogs_three_or_more <- cleaned_without_healthy_dogs %>% 
+  filter(total_diseases >= 3) %>% 
+  nrow()
+  
+total_dogs <- nrow(cleaned_without_healthy_dogs)
+
+percent_two_or_less <- dogs_two_or_less / total_dogs * 100
+percent_three_or_more <- dogs_three_or_more / total_dogs * 100
+
+# Print the results
+cat("Dogs with 2 or fewer diseases:", dogs_two_or_less, 
+    "(", round(percent_two_or_less, 2), "%)\n")
+cat("Dogs with 3 or more diseases:", dogs_three_or_more, 
+    "(", round(percent_three_or_more, 2), "%)\n")
 # Print the plot
 print(total_diseases_histogram)
 
@@ -245,7 +257,6 @@ diseases_data <- cleaned_with_healthy_dogs %>%
   mutate(
     # Create factors and combined variables
     purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
-    ivdd_combined = as.numeric(condition_1111 > 0 | condition_1210 > 0),
     age = as.numeric(dd_age_years),
     weight = as.numeric(dd_weight_lbs),
     sex_2 = as.numeric(recode.sex_2),
@@ -266,7 +277,7 @@ diseases <- c(
     "condition_1117", # Patellar luxation
     "condition_1105", # Cruciate ligament
     "condition_707",  # Bloat
-    "ivdd_combined",  # Combined IVDD
+    "condition_1210",  # IVDD
     "condition_1312", # Hypothyroidism
     "condition_1304", # Hypoadrenocorticism
     "condition_1305", # Hyperadrenocorticism
@@ -314,8 +325,7 @@ diseases <- c(
     "condition_201",  # Deafness
     "condition_914",  # Urinary crystals/stones
     "condition_1601", # Anaplasmosis
-    "condition_1804", # Fractured bone (limb)
-    "condition_1805", # Fractured bone (other)
+    "condition_1804", # Fractured bone 
     "condition_414",  # Lick granuloma
     "condition_908",  # Chronic kidney disease
     "condition_612"   # Tracheal collapse
@@ -385,7 +395,7 @@ disease_names <- c(
    "Patellar Luxation" = "condition_1117",
    "Cruciate Ligament Rupture" = "condition_1105",
    "Bloat" = "condition_707",
-   "IVDD" = "ivdd_combined",
+   "IVDD" = "condition_1210",
    "Hypothyroidism" = "condition_1312",
    "Hypoadrenocorticism" = "condition_1304",
    "Hyperadrenocorticism" = "condition_1305",
@@ -431,8 +441,7 @@ disease_names <- c(
    "Deafness" = "condition_201",
    "Urinary Crystals/Stones" = "condition_914",
    "Anaplasmosis" = "condition_1601",
-   "Fractured Bone (Limb)" = "condition_1804",
-   "Fractured Bone (Other)" = "condition_1805",
+   "Fractured Bone" = "condition_1804",
    "Lick Granuloma" = "condition_414",
    "Chronic Kidney Disease" = "condition_908",
    "Tracheal Collapse" = "condition_612"
@@ -450,7 +459,7 @@ results_formatted <- results %>%
       Disease == "condition_313" ~ "Underbite",
       Disease == "condition_109" ~ "Corneal ulcer",
       Disease == "condition_411" ~ "Fleas",
-      Disease == "ivdd_combined" ~ "Intervertebral disc disease (IVDD)",
+      Disease == "condition_1210" ~ "Intervertebral disc disease (IVDD)",
       Disease == "condition_112" ~ "Entropion",
       Disease == "condition_916" ~ "Urinary tract infection",
       Disease == "condition_311" ~ "Retained deciduous teeth",
@@ -480,7 +489,6 @@ results_formatted <- results %>%
       Disease == "condition_428" ~ "Sebaceous cysts",
       Disease == "condition_406" ~ "Chronic or recurrent hot spots",
       Disease == "condition_708" ~ "Chronic or recurrent diarrhea",
-      Disease == "condition_1805" ~ "Fractured bone",
       Disease == "condition_1627" ~ "Lyme disease",
       Disease == "condition_201" ~ "Deafness",
       Disease == "condition_1117" ~ "Patellar luxation",
@@ -499,7 +507,7 @@ results_formatted <- results %>%
       Disease == "condition_908" ~ "Chronic kidney disease",
       Disease == "condition_1305" ~ "Cushing's disease",
       Disease == "condition_1110" ~ "Hip dysplasia",
-      Disease == "condition_1804" ~ "Fractured bone (limb)",
+      Disease == "condition_1804" ~ "Fractured bone",
       Disease == "condition_612" ~ "Tracheal collapse",
       Disease == "condition_1601" ~ "Anaplasmosis",
       TRUE ~ Disease
