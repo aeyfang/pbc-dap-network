@@ -18,7 +18,6 @@ library(purrr)
 library(tidygraph)
 theme_set(theme_cowplot())
 edge_percent <- 1
-
 ```
 
 ```{r}
@@ -29,7 +28,10 @@ disease_code<-read.csv(file = "./diseaseCodes.csv")
 
 # Load disease frequencies to help with hs_cancer_types mapping
 disease_frequencies <- read.csv("./frequency tables/disease_frequencies_unstrat.csv")
+```
 
+
+```{r}
 # Define a cleaning function for disease names
 clean_disease_name <- function(name) {
   if (startsWith(name, "condition_")) {
@@ -43,9 +45,8 @@ clean_disease_name <- function(name) {
   return(name)
 }
 
-# Apply cleaning function
-significant_pairs <- significant_pairs %>%
-  mutate(
+formatted_significant_pairs <- significant_pairs %>%
+  transmute(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   ) %>%
@@ -57,22 +58,16 @@ significant_pairs <- significant_pairs %>%
   filter(
     !(Disease1 %% 100 %in% c(98, 99) |
       Disease2 %% 100 %in% c(98, 99) |
-      Disease1 == 719 |
-      Disease2 == 719)
+      Disease1 == 716 |
+      Disease2 == 716.       )
   )
 
+unique_formatted_diseases <- unique(c(formatted_significant_pairs$Disease1, formatted_significant_pairs$Disease2))
+print(paste("Number of unique formatted diseases:", length(unique_formatted_diseases)))
+print("Unique formatted disease codes:")
+print(unique_formatted_diseases)
 ```
 
-```{r}
-formatted_significant_pairs <- significant_pairs %>%
-  transmute(
-    Disease1 = Disease1,
-    Disease2 = Disease2,
-    weight = AdjustedPValue
-  )
-
-class(formatted_significant_pairs$Disease1)
-```
 
 
 ```{r}
@@ -94,10 +89,15 @@ names(all.colors) <- categoryLabels
 ```
 
 ```{r}
-# 1. Build early_graph
 early_graph <- graph_from_data_frame(formatted_significant_pairs, directed = FALSE)
+print(paste("Number of nodes in early_graph:", length(V(early_graph))))
+print("Nodes in early_graph:")
+print(V(early_graph)$name)
+```
 
-# 2. Attach consolidated category
+```{r}
+# Attach consolidated category information to the graph nodes
+# Basically places condition category other than important ones identified above into the "Other" bin
 modules <- disease_code %>%
   mutate(
     category = Disease.Category,
@@ -110,8 +110,10 @@ nodes_info <- data.frame(code = as.integer(V(early_graph)$name)) %>%
   left_join(modules, by = "code")
 
 V(early_graph)$consolidated.category <- nodes_info$consolidated.category
+```
 
-# 3. Identify singleton nodes
+```{r}
+# Identify singleton nodes
 is_singleton <- function(v) {
   neighbors_v <- neighbors(early_graph, v)
   if (length(neighbors_v) == 0) {
@@ -123,10 +125,48 @@ is_singleton <- function(v) {
 }
 
 singleton_flags <- sapply(V(early_graph), is_singleton)
-
 singleton_node_codes <- as.integer(V(early_graph)$name[singleton_flags])
 
+# Print the singleton nodes
+print(paste("Singleton nodes:", paste(singleton_node_codes, collapse = ", ")))
 
+# Verify the singleton status of each node and print its neighbors
+for (node_code in singleton_node_codes) {
+  node_index <- which(V(early_graph)$name == node_code)
+  node_category <- V(early_graph)$consolidated.category[node_index]
+  node_neighbors <- neighbors(early_graph, node_index)
+  neighbor_categories <- V(early_graph)$consolidated.category[node_neighbors]
+  
+  # Get the actual neighbor node codes
+  neighbor_codes <- V(early_graph)$name[node_neighbors]
+  
+  cat("Node", node_code, "(Category:", node_category, ")\n")
+  cat("Neighbor Indices:", paste(node_neighbors, collapse = ", "), "\n")
+  cat("Neighbor Codes:", paste(neighbor_codes, collapse = ", "), "\n")
+  cat("Neighbor Categories:", paste(neighbor_categories, collapse = ", "), "\n\n")
+}
+```
+```{r}
+# Additional key nodes and edges to keep separate
+# These nodes are chosen based on edges highlighted in the manuscript
+key_nodes <- c(101, 404, 514, 908, 911, 1305, 1307, 1407)
+key_edges <- list(
+  c(1307, 101),  # Diabetes and blindness
+  c(1305, 404),  # Cushing's disease and alopecia
+  c(514, 908),   # Hypertension and CKD
+  c(911, 1407),  # Proteinuria and anemia
+  c(908, 911)    # CKD and proteinuria
+)
+
+# Function to check if an edge is in the key_edges list
+is_key_edge <- function(edge) {
+  any(sapply(key_edges, function(key_edge) {
+    all(ends(early_graph, edge) %in% key_edge)
+  }))
+}
+
+# Identify key edges in the graph
+key_edge_indices <- which(sapply(E(early_graph), is_key_edge))
 ```
 
 ```{r}
@@ -200,14 +240,28 @@ V(graph)$category <- nodes.stat$category
 V(graph)$module <- as.numeric(as.factor(nodes.stat$module))
 V(graph)$prevalence <- nodes.stat$frequency
 
-# 🔥 Create hub labels
 V(graph)$hub <- ifelse(
-  V(graph)$category %in% most.prevalent.category,
-  as.character(V(graph)$category),         # Group nodes will be labeled by category
-  as.character(nodes.stat$Disease.Name)     # Singletons will be labeled by specific disease name
+  as.integer(V(graph)$name) %in% key_nodes,
+  as.character(nodes.stat$Disease.Name),      # 🔥 key_nodes always get specific name
+  ifelse(
+    V(graph)$category %in% most.prevalent.category,
+    as.character(V(graph)$category),          # normal group nodes: category name
+    as.character(nodes.stat$Disease.Name)     # other singletons: specific name
+  )
 )
 
+# Abbreviate
+V(graph)$hub <- V(graph)$hub |>
+  gsub("Intervertebral Disc Disease", "IVDD", x = _) |>
+  gsub("Chronic Kidney Disease", "CKD", x = _)
+
+# Remove parenthetical at end of names
+V(graph)$hub <- gsub("\\s*\\([^\\)]+\\)$", "", V(graph)$hub)
+
+
 V(graph)$module[is.na(V(graph)$module)] <- 999
+
+
 
 # Contract the graph
 gn <- contract(graph, V(graph)$module, vertex.attr.comb = list(
@@ -218,6 +272,7 @@ gn <- contract(graph, V(graph)$module, vertex.attr.comb = list(
   module = 'ignore',
   consolidated.category = 'first'
 ))
+
 
 # Assign node types
 group_module_ids <- c(1, 3, 4, 5, 6, 7, 11, 13, 16, 17, 18)
@@ -240,16 +295,141 @@ E(gn)$edge_color <- ifelse(
   "Cross-category"
 )
 
+# After building gn and assigning V(gn)$type, etc
 
-p3 <- ggraph(gn, layout = layout_nicely(gn)) + 
-  geom_edge_link(aes(color = edge_color), alpha = 0.5) +
+# Identify important nodes
+important_node_ids <- V(gn)$name[
+  V(gn)$type == "single" & (V(gn)$prevalence > 10 | as.integer(V(gn)$name) %in% key_nodes)
+]
+
+# Assign labels
+label_flags <- sapply(V(gn), function(v) {
+  if (V(gn)$type[v] == "single") {
+    return(V(gn)$prevalence[v] > 10 | as.integer(V(gn)$name[v]) %in% key_nodes)
+  } else {
+    neighbors_v <- neighbors(gn, v)
+    any(V(gn)$name[neighbors_v] %in% important_node_ids)
+  }
+})
+
+# Assign final hub labels
+V(gn)$final_hub_label <- ifelse(label_flags, V(gn)$hub, "")
+
+```
+
+```{r}
+
+# Tag key nodes (for bold labeling)
+V(gn)$is_key_node <- as.integer(V(gn)$name) %in% key_nodes
+
+# Tag key edges (for light red highlight)
+# Convert key_edges to character names if needed
+key_edges_char <- lapply(key_edges, function(x) as.character(x))
+
+# Get edge endpoints
+edge_ends <- ends(gn, es = E(gn), names = TRUE)
+
+# Create is_key_edge flag
+E(gn)$is_key_edge <- apply(edge_ends, 1, function(x) {
+  any(sapply(key_edges_char, function(ke) all(ke %in% x)))
+})
+
+
+# Create the layout
+graph_layout <- create_layout(gn, layout = "nicely")
+
+# Step 1: Build data frame for key edges
+key_edge_df <- data.frame(
+  from = ends(gn, E(gn), names = TRUE)[,1],
+  to = ends(gn, E(gn), names = TRUE)[,2],
+  is_key_edge = E(gn)$is_key_edge
+)
+
+# Step 2: Attach node coordinates
+key_edge_df <- key_edge_df %>%
+  filter(is_key_edge) %>%
+  left_join(
+    graph_layout %>% as.data.frame() %>% select(name, x, y),
+    by = c("from" = "name")
+  ) %>%
+  rename(x = x, y = y) %>%
+  left_join(
+    graph_layout %>% as.data.frame() %>% select(name, xend = x, yend = y),
+    by = c("to" = "name")
+  )
+
+# Step 1: Identify important nodes
+important_node_ids <- V(gn)$name[
+  V(gn)$type == "single" & (V(gn)$prevalence > 10 | as.integer(V(gn)$name) %in% key_nodes)
+]
+
+# Step 2: Decide which group nodes to label
+label_flags <- sapply(V(gn), function(v) {
+  if (V(gn)$type[v] == "single") {
+    # Singletons: label if prevalence high or key node
+    return(V(gn)$prevalence[v] > 10 | as.integer(V(gn)$name[v]) %in% key_nodes)
+  } else {
+    # Groups: label only if connected to important node
+    neighbors_v <- neighbors(gn, v)
+    any(V(gn)$name[neighbors_v] %in% important_node_ids)
+  }
+})
+
+# Step 3: Apply label masking
+V(gn)$final_hub_label <- ifelse(label_flags, V(gn)$hub, "")
+
+```
+```{r}
+# Plot
+p3 <- ggraph(graph_layout) +
+  
+  # Draw all edges (background layer)
+  geom_edge_link(
+    aes(color = edge_color),
+    alpha = 0.3,
+    edge_width = 0.6
+  ) +
+  
+  # Draw key edges (overlay thin red lines)
+  geom_segment(
+  data = key_edge_df,
+  aes(x = x, y = y, xend = xend, yend = yend),
+  color = "red",
+  size = 1.2,
+  alpha = 0.5,
+  inherit.aes = FALSE
+) +
+  
+  # Draw nodes
+  geom_node_point(
+    aes(color = consolidated.category, size = prevalence, shape = type)
+  ) +
+  
+  # Draw labels with bold key nodes
+  geom_node_label(
+  aes(
+    label = final_hub_label,
+    fontface = ifelse(is_key_node, "bold", "italic")
+  ),
+  repel = TRUE,
+  force = 1.5,        # 🔥 Stronger repulsion between labels
+  box.padding = 0.5,  # 🔥 More padding between label boxes
+  point.padding = 0.1, # 🔥 More padding between label and node point
+  size = 3.5,         # Bigger text
+  fill = "white",     # White box
+  label.size = 0.2,   # Thin border around box
+  label.r = 0.2,      # Rounded corners (optional, looks cleaner)
+  color = "black"     # Black text
+)+
+  
+  # Color, size, and shape scales
   scale_edge_colour_manual(values = all.colors) +
-  geom_node_point(aes(color = consolidated.category, size = prevalence, shape = type)) +
   scale_colour_manual(values = all.colors) +
   scale_shape_manual(values = c("group" = 17, "single" = 16)) +
-  geom_node_label(aes(label = hub), repel = TRUE, max.overlaps = Inf, fontface = 'italic') +
-  ggtitle("Contracted Disease Network (layout_nicely)") +
-  theme_minimal()
+  
+  # Themes
+  theme_minimal() +
+  ggtitle("Contracted Disease Network (layout_nicely)")
 
 p3
 
