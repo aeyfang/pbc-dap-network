@@ -78,7 +78,7 @@ most.prevalent.category <- c('Eye',
                              "Gastrointestinal",
                              "Bone/Orthopedic",
                              "Toxin Consumption",
-                             "Infection/Parasites"
+                             "Infection/Parasites",
                              "Trauma"
                               )
 
@@ -198,55 +198,53 @@ disease_code_for_collapsing_groups <- disease_code %>%
 ```
 
 
-```{r}
-disease_code_for_collapsing_groups <- disease_code %>%
-  mutate(module = Numerical.Codes) %>%
-  
-  mutate(module = ifelse(module %in% seq(101, 198) & !(module %in% singleton_node_codes), 1, module)) %>%  # Eye
-  mutate(module = ifelse(module %in% seq(301, 398) & !(module %in% singleton_node_codes), 3, module)) %>%  # Mouth/Dental/Oral
-  mutate(module = ifelse(module %in% seq(401, 497) & !(module %in% singleton_node_codes), 4, module)) %>%  # Skin
-  mutate(module = ifelse(module %in% seq(501, 598) & !(module %in% singleton_node_codes), 5, module)) %>%  # Cardiac
-  mutate(module = ifelse(module %in% seq(601, 698) & !(module %in% singleton_node_codes), 6, module)) %>%  # Respiratory
-  mutate(module = ifelse(module %in% seq(701, 798) & !(module %in% singleton_node_codes), 7, module)) %>%  # Gastrointestinal
-  mutate(module = ifelse(module %in% seq(1101, 1198) & !(module %in% singleton_node_codes), 11, module)) %>%  # Bone/Orthopedic
-  mutate(module = ifelse(module %in% seq(1301, 1398) & !(module %in% singleton_node_codes), 13, module)) %>%  # Endocrine
-  mutate(module = ifelse(module %in% seq(1601, 1697) & !(module %in% singleton_node_codes), 16, module)) %>%  # Infection/Parasites
-  mutate(module = ifelse(module %in% seq(1701, 1798) & !(module %in% singleton_node_codes), 17, module)) %>%  # Toxin Consumption
-  mutate(module = ifelse(module %in% seq(1801, 1897) & !(module %in% singleton_node_codes), 18, module)) %>%  # Trauma
-  
-  mutate(
-    category = Disease.Category,
-    code = Numerical.Codes,
-    consolidated.category = ifelse(category %in% most.prevalent.category, category, "Other")
-  ) %>%
-  select(code, category, consolidated.category, module) %>%
-   filter(code %in% as.integer(V(early_graph)$name))
-
-```
 
 ```{r}
+graph <- graph_from_data_frame(formatted_significant_pairs, directed=F) %>%
+  as_tbl_graph(directed=F) %>% 
+  activate(nodes)
+
+nodes.stat <- data.frame(code=as.integer(V(graph)$name)) %>% 
+  left_join(disease_code_for_collapsing_groups, by='code')
+
+V(graph)$module <- as.numeric(as.factor(nodes.stat$module))
+
 # Contract the graph
-gn <- contract(graph, V(graph)$module, vertex.attr.comb=list(
-  name = 'first',
-  category = 'first',
-  prevalence = 'sum',
-  hub = 'first',
-  module = 'ignore',
-  consolidated.category = 'first'
+gn <- contract(early_graph, V(graph)$module, vertex.attr.comb=list(
+  name='first', category='first', prevalence='sum', 
+  hub='first', module='ignore', consolidated.category='first'
 ))
 
-# Dynamically detect number of collapsed groups
-group_module_ids <- c(1, 3, 4, 5, 6, 7, 11, 13, 16, 17, 18)
-
+group_module_ids <- c(1, 2, 3, 4, 5, 6, 7, 11, 16, 17, 18)
 actual_no_collapsed <- sum(as.integer(V(gn)$name) %in% group_module_ids)
 
-# Assign node types
 V(gn)$type <- c(
   rep('group', actual_no_collapsed),
   rep('single', length(V(gn)$name) - actual_no_collapsed)
 )
 ```
 
+```{r}
+edge_cats <- ends(gn, es=E(gn), names=F)
+category1 <- V(gn)$consolidated.category[edge_cats[,1]] 
+category2 <- V(gn)$consolidated.category[edge_cats[,2]]
+E(gn)$edge_color <- ifelse(category1==category2, as.character(category1), "Cross-category")
+
+
+```
+
+```{r}
+p3 <- ggraph(gn, layout=layout_nicely(gn)) + 
+ geom_edge_link(aes(color=edge_color)) +
+ scale_edge_colour_manual(values=all.colors) +
+ geom_node_point(aes(color=consolidated.category, size=prevalence, shape=type)) +
+ scale_colour_manual(values=all.colors) +
+ scale_shape_manual(values=c(17,16)) +  
+ geom_node_label(aes(label=hub), repel=TRUE, fontface='italic') +
+ ggtitle("Contracted Disease Network")
+
+p3
+```
 
 ```{r}
 # Build the graph object
