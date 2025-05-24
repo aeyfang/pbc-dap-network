@@ -55,11 +55,9 @@ formatted_significant_pairs <- significant_pairs %>%
     Disease2 = as.integer(Disease2)
   ) %>%
   filter(!is.na(Disease1) & !is.na(Disease2)) %>%
-  filter(
-    !(Disease1 %% 100 %in% c(98, 99) |
-      Disease2 %% 100 %in% c(98, 99) |
-      Disease1 == 716 |
-      Disease2 == 716.       )
+  filter(!str_detect(Disease1, "9[89]$|^716$"), 
+         !str_detect(Disease2, "9[89]$|^716$")) %>%
+  mutate(across(c(Disease1, Disease2), as.integer)
   )
 
 unique_formatted_diseases <- unique(c(formatted_significant_pairs$Disease1, formatted_significant_pairs$Disease2))
@@ -71,13 +69,17 @@ print(unique_formatted_diseases)
 
 
 ```{r}
-most.prevalent.category <- c('Brain/Neurologic', 
-                             'Cancer',
-                             'Kidney/Urinary',
-                             'Cardiac', 
-                             'Gastrointestinal',
-                             'Ear/Nose/Throat',
-                             'Skin','Eye','Liver/Pancreas'
+most.prevalent.category <- c('Eye',
+                             "Ear/Nose/Throat",
+                             "Mouth/Dental/Oral",
+                             "Skin",
+                             "Cardiac",
+                             "Respiratory",
+                             "Gastrointestinal",
+                             "Bone/Orthopedic",
+                             "Toxin Consumption",
+                             "Infection/Parasites"
+                             "Trauma"
                               )
 
 # Get enough colors (9 prevalent + 1 Other + 1 Cross-category)
@@ -170,6 +172,33 @@ key_edge_indices <- which(sapply(E(early_graph), is_key_edge))
 ```
 
 ```{r}
+# Collapsing groups
+disease_code_for_collapsing_groups <- disease_code %>%
+  mutate(module = Numerical.Codes) %>%
+  
+  mutate(module = ifelse(module %in% seq(101, 198) & !(module %in% c(singleton_node_codes, key_nodes)), 1, module)) %>%  # Eye
+  mutate(module = ifelse(module %in% seq(201, 298) & !(module %in% c(singleton_node_codes, key_nodes)), 2, module)) %>%  # Ear/Nose/Throat
+  mutate(module = ifelse(module %in% seq(301, 398) & !(module %in% c(singleton_node_codes, key_nodes)), 3, module)) %>%  # Mouth/Dental/Oral
+  mutate(module = ifelse(module %in% seq(401, 497) & !(module %in% c(singleton_node_codes, key_nodes)), 4, module)) %>%  # Skin
+  mutate(module = ifelse(module %in% seq(501, 598) & !(module %in% c(singleton_node_codes, key_nodes)), 5, module)) %>%  # Cardiac
+  mutate(module = ifelse(module %in% seq(601, 698) & !(module %in% c(singleton_node_codes, key_nodes)), 6, module)) %>%  # Respiratory
+  mutate(module = ifelse(module %in% seq(701, 798) & !(module %in% c(singleton_node_codes, key_nodes)), 7, module)) %>%  # Gastrointestinal
+  mutate(module = ifelse(module %in% seq(1101, 1198) & !(module %in% c(singleton_node_codes, key_nodes)), 11, module)) %>%  # Bone/Orthopedic
+  mutate(module = ifelse(module %in% seq(1601, 1697) & !(module %in% c(singleton_node_codes, key_nodes)), 16, module)) %>%  # Infection/Parasites
+  mutate(module = ifelse(module %in% seq(1701, 1798) & !(module %in% c(singleton_node_codes, key_nodes)), 17, module)) %>%  # Toxin Consumption
+  mutate(module = ifelse(module %in% seq(1801, 1897) & !(module %in% c(singleton_node_codes, key_nodes)), 18, module)) %>%  # Trauma
+  
+  mutate(
+    category = Disease.Category,
+    code = Numerical.Codes,
+    consolidated.category = ifelse(category %in% most.prevalent.category, category, "Other")
+  ) %>%
+  select(code, category, consolidated.category, module) %>%
+  filter(code %in% as.integer(V(early_graph)$name))
+```
+
+
+```{r}
 disease_code_for_collapsing_groups <- disease_code %>%
   mutate(module = Numerical.Codes) %>%
   
@@ -190,7 +219,8 @@ disease_code_for_collapsing_groups <- disease_code %>%
     code = Numerical.Codes,
     consolidated.category = ifelse(category %in% most.prevalent.category, category, "Other")
   ) %>%
-  select(code, category, consolidated.category, module)
+  select(code, category, consolidated.category, module) %>%
+   filter(code %in% as.integer(V(early_graph)$name))
 
 ```
 
