@@ -132,6 +132,28 @@ health_condition_wide <- health_condition_wide %>%
   ) %>%
   dplyr::select(-condition_1111)
 
+# Consolidate laryngeal paralysis entries
+health_condition_wide <- health_condition_wide %>%
+  mutate(
+    condition_1211 = if_else(
+      (if("condition_608" %in% names(.)) condition_608 else 0) == 1 |
+      (if("condition_1211" %in% names(.)) condition_1211 else 0) == 1,
+      1, 0
+    )
+  ) %>%
+  dplyr::select(-condition_608)
+
+# Consolidate umbilical hernia entries
+health_condition_wide <- health_condition_wide %>%
+  mutate(
+    condition_403 = if_else(
+      (if("condition_403" %in% names(.)) condition_403 else 0) == 1 |
+      (if("condition_704" %in% names(.)) condition_704 else 0) == 1,
+      1, 0
+    )
+  ) %>%
+  dplyr::select(-condition_704)
+
 # Consolidate fracture entries
 health_condition_wide <- health_condition_wide %>%
   mutate(
@@ -239,6 +261,12 @@ generate_frequency_table <- function(data, suffix = "") {
   
   # Update condition name for IVDD code 1210
   disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1210"] <- "Intervertebral disk disease (IVDD)"
+  
+  # Update condition name for umbilical hernia 403
+  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "403"] <- "Umbilical hernia"
+  
+    # Update condition name for laryngeal paralysis 1211
+  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1211"] <- "Larygneal paralysis"
   
   # Save frequency table to CSV
   write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
