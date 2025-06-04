@@ -1,6 +1,9 @@
 ---
 title: "undirected_network_analysis"
 author: "Antoinette Fang"
+date: "2024---
+title: "undirected_network_analysis"
+author: "Antoinette Fang"
 date: "2024-07-21"
 output: html_document
 ---
@@ -29,7 +32,7 @@ dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 #
 # NOTE: This script must be run separately for each dataset to generate all networks.
 # The outputs from data_cleaning.Rmd provide the input files for each stratum.
-analysis_type <- "unstrat"
+analysis_type <- "senior"
 ```
 
 ```{r data loading}
@@ -280,6 +283,11 @@ calculate_pair_statistics <- function(pair) {
   # Calculate variance under Poisson binomial distribution
   variance <- sum(risk1 * risk2 * (1 - risk1 * risk2))
   
+  # Normal approximation for 95% CI
+  z_crit <- qnorm(0.975)
+  ci_lower <- expected_value - z_crit * sqrt(variance)
+  ci_upper <- expected_value + z_crit * sqrt(variance)
+  
   # Calculate z-score and p-value
   z_score <- (test_value - expected_value) / sqrt(variance)
   p_value <- 1 - pnorm(z_score)
@@ -292,7 +300,9 @@ calculate_pair_statistics <- function(pair) {
     Disease2 = disease2,
     TestValue = test_value, 
     ExpectedValue = expected_value, 
-    Variance = variance, 
+    Variance = variance,
+    CI_Lower = ci_lower,
+    CI_Upper = ci_upper,
     PValue = p_value,
     IsPositive = is_positive)
 }
@@ -413,6 +423,9 @@ write.csv(comprehensive_attribute_table,
 
 cat("Network attribute tables generated for", analysis_type, "dataset.\n")
 ```
+
+
+
 
 
 

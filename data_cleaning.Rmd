@@ -31,9 +31,9 @@ disease_code <- read.csv(file = "./diseaseCodes.csv", row.names = NULL)
 
 ```{r data processing and merging}
 # Process dog_owner dataframe
-# Extract key demographic variables and convert to appropriate types
+# Extract key demographic variables (as well as other variables of interest) and convert to appropriate types
 dog_owner <- dog_owner %>%
-  dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered) %>%
+  dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered, od_annual_income_range_usd,mp_flea_and_tick_treatment,mp_heartworm_preventative) %>%
   mutate(
     dog_id = as.character(dog_id),
     dd_age_years = as.numeric(dd_age_years),

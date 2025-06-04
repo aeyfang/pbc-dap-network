@@ -47,7 +47,6 @@ reference <- read.csv("./frequency tables/disease_frequencies_unstrat.csv") %>%
 diseases_data <- cleaned_with_healthy_dogs %>%
   mutate(
     purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
-    ivdd_combined = as.numeric(condition_1111 > 0 | condition_1210 > 0),
     age = as.numeric(dd_age_years),
     weight = as.numeric(dd_weight_lbs),
     sex_2 = as.numeric(recode.sex_2),
@@ -67,7 +66,6 @@ focus_diseases <- c(
     "condition_1117", # Patellar luxation
     "condition_1105", # Cruciate ligament
     "condition_707",  # Bloat
-    "ivdd_combined",  # Combined IVDD
     "condition_1312", # Hypothyroidism
     "condition_1304", # Hypoadrenocorticism
     "condition_1305", # Hyperadrenocorticism
@@ -85,8 +83,7 @@ focus_diseases <- c(
 # Create list of all disease columns for analysis
 all_diseases <- c(
     "hs_cancer_types_mast_cell_tumor",
-    paste0("condition_", reference$Code.from.DAP.data[reference$Code.from.DAP.data != "hs_cancer_types_mast_cell_tumor"]),
-    "ivdd_combined"
+    paste0("condition_", reference$Code.from.DAP.data[reference$Code.from.DAP.data != "hs_cancer_types_mast_cell_tumor"])
 )
 
 # Function to fit model and extract results
@@ -155,9 +152,6 @@ results <- results %>%
 results_formatted <- results %>%
   mutate(
     Disease = sapply(Disease, function(d) {
-      if(d == "ivdd_combined") {
-        return("Intervertebral disc disease (IVDD)")
-      }
       if(grepl("condition_", d)) {
         code <- sub("condition_", "", d)
         match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
@@ -187,9 +181,6 @@ write.csv(results_formatted,"./additional stats/breed_odds_ratios.csv")
 # Create forest plot of focus diseases
 focus_results <- results_formatted %>%
   filter(Disease %in% sapply(focus_diseases, function(d) {
-    if(d == "ivdd_combined") {
-      return("Intervertebral disc disease (IVDD)")
-    }
     if(grepl("condition_", d)) {
       code <- sub("condition_", "", d)
       match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
@@ -720,8 +711,5 @@ row.names(global_network_stats) <- c(
 # Print network statistics
 print(global_network_stats)
 ```
-
-
-
 
 

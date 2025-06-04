@@ -154,9 +154,14 @@ ggsave("./summary statistics/disease_category_distribution.png",
 top_20_diseases <- disease_frequencies %>%
   arrange(desc(frequency)) %>%
   top_n(20, frequency) %>%
-  mutate(Disease.Name = ifelse(Disease.Name == "Chocolate", 
-                               "Chocolate toxin consumption", 
-                               Disease.Name))
+  mutate(Disease.Name = case_when(
+    Disease.Name == "Chocolate" ~ "Chocolate toxin consumption",
+    Disease.Name == "Dental calculus (yellow build-up on teeth)" ~ "Dental calculus",
+    Disease.Name == "Bordetella and/or parainfluenza (kennel cough)" ~ "Bordetella and /or parainfluenza",
+    Disease.Name == "Pruritis (itchy skin)" ~ "Pruritis",
+    Disease.Name == "Gingivitis (red, puffy gums)" ~ "Gingivitis",
+    TRUE ~ Disease.Name
+  ))
 
 # Create horizontal bar plot of top 20 diseases
 top_20_diseases_plot <- ggplot(top_20_diseases, 
@@ -197,7 +202,7 @@ total_diseases_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = total_d
   scale_y_continuous(labels = scales::comma) +
   theme(
     axis.title = element_text(size = 16, face = "bold"),
-    axis.text = element_text(size = 12)
+    axis.text = element_text(size = 12, frace)
   )
 
 # Calculate dogs with ≤2 diseases and ≥3 diseases
@@ -229,6 +234,11 @@ ggsave("./summary statistics/total_diseases_distribution.png",
        height = 6, 
        dpi = 600)
 
+
+
+```
+```{r}
+
 # Combine disease count and top 20 diseases plots for Supplementary Figure 1
 combined_plot <- plot_grid(
   total_diseases_histogram, 
@@ -237,13 +247,25 @@ combined_plot <- plot_grid(
   rel_heights = c(1, 1)  # Equal heights
 )
 
+# Display the combined plot
+print(combined_plot)
+
 # Save the combined plot as a supplementary figure
-ggsave("./supplementary figures/S1_Fig.tiff", 
+ggsave("./summary statistics/combined_Fig1_plots.tiff", 
        combined_plot,
        width = 8,      
        height = 10,    
        dpi = 600, 
        compression = 'lzw')
+
+# Save the combined plot
+ggsave(
+  filename = "./summary statistics/combined_Fig1_plots.png",
+  plot = combined_plot,
+  width = 8,
+  height = 10,
+  dpi = 600
+)
 
 ```
 
