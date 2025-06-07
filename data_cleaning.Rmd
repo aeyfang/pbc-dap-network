@@ -33,7 +33,7 @@ disease_code <- read.csv(file = "./diseaseCodes.csv", row.names = NULL)
 # Process dog_owner dataframe
 # Extract key demographic variables (as well as other variables of interest) and convert to appropriate types
 dog_owner <- dog_owner %>%
-  dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered, od_annual_income_range_usd,mp_flea_and_tick_treatment,mp_heartworm_preventative) %>%
+  dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered, od_annual_income_range_usd,mp_flea_and_tick_treatment,mp_heartworm_preventative,od_race_white,od_race_alaska_native,od_race_black_or_african_american,od_race_native_hawaiian,od_race_asian,od_race_other_pacific_islander,od_race_american_indian,od_hispanic, od_max_education) %>%
   mutate(
     dog_id = as.character(dog_id),
     dd_age_years = as.numeric(dd_age_years),
@@ -164,6 +164,17 @@ health_condition_wide <- health_condition_wide %>%
   ) %>%
   select(-condition_1805, -condition_1806, -condition_1807, -condition_1808)
 
+#Consolodiate osteoarthritis and degenerative joint disease
+health_condition_wide <- health_condition_wide %>%
+  mutate(
+    condition_1113 = if_else(
+      (if("condition_1113" %in% names(.)) condition_1113 else 0) == 1 |
+      (if("condition_1106" %in% names(.)) condition_1106 else 0) == 1,
+      1, 0
+    )
+  ) %>%
+  dplyr::select(-condition_1106)
+
 health_condition_wide <- health_condition_wide %>%
   mutate(across(everything(), ~replace_na(., 0))) %>%
   {
@@ -283,6 +294,45 @@ overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
 # Generate frequency tables for each stratum with simplified naming
 strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
                            ~generate_frequency_table(.x, paste0("_", .y)))
+```
+
+```{r}
+# Create and save S1b_Table from overall_frequencies
+write_s1b_table <- function(freq_table) {
+  s1b_table <- freq_table %>%
+    dplyr::select(
+      `Condition Name` = Disease.Name,
+      `Condition Category` = Disease.Category,
+      `Frequency` = frequency
+    ) %>%
+    arrange(desc(Frequency))
+
+  write.csv(s1b_table, "./NEW supplemental figures/S1b_Table.csv", row.names = FALSE)
+
+  return(s1b_table)
+}
+
+# Example usage
+s1b_table <- write_s1b_table(overall_frequencies)
+
+
+# Create and save summary table of number of observed conditions per category
+generate_category_summary_from_frequencies <- function(freq_table) {
+  category_summary <- freq_table %>%
+    dplyr::count(`Disease.Category`, name = "Number of Conditions") %>%
+    arrange(desc(`Number of Conditions`))
+
+  # Save to CSV
+  write.csv(category_summary, "./NEW supplemental figures/S1a_Table.csv", row.names = FALSE)
+
+  return(category_summary)
+}
+
+# Example usage using the existing overall_frequencies
+s1a_category_summary <- generate_category_summary_from_frequencies(overall_frequencies)
+
+
+
 ```
 
 

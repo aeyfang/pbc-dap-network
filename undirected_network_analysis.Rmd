@@ -412,7 +412,8 @@ comprehensive_attribute_table <- network_df %>%
     Disease1, Disease1_key, Disease1_name,
     Disease2, Disease2_key, Disease2_name,
     TestValue, ExpectedValue,
-    Variance,
+    Variance, CI_Lower ,
+    CI_Upper,
     PValue, AdjustedPValue
   ) %>%
   arrange(AdjustedPValue)

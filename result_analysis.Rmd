@@ -36,237 +36,40 @@ puppy_pairs <- read.csv("./pair stats/significant_pairs_puppy.csv", stringsAsFac
   mutate(age_group = "puppy")
 unstrat_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "unstratified")
+frequency<-read.csv("./frequency tables/disease_frequencies_unstrat.csv")
 ```
 
-```{r breed specific analysis}
-# Create a reference table from frequency table for disease code lookup
-reference <- read.csv("./frequency tables/disease_frequencies_unstrat.csv") %>%
-  dplyr::select(Code.from.DAP.data, Disease.Name)
 
-# Prepare dataset for analysis: Create combined IVDD column and add derived variables
-diseases_data <- cleaned_with_healthy_dogs %>%
-  mutate(
-    purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
-    age = as.numeric(dd_age_years),
-    weight = as.numeric(dd_weight_lbs),
-    sex_2 = as.numeric(recode.sex_2),
-    sex_3 = as.numeric(recode.sex_3),
-    sex_4 = as.numeric(recode.sex_4)
-  )
-
-# Define specific diseases of interest from literature
-focus_diseases <- c(
-    # Original diseases from first analysis
-    "hs_cancer_types_mast_cell_tumor",
-    "condition_405",  # Atopic dermatitis
-    "condition_1110", # Hip dysplasia
-    "condition_1108", # Elbow dysplasia
-    "condition_1215", # Epilepsy
-    "condition_102",  # Cataracts
-    "condition_1117", # Patellar luxation
-    "condition_1105", # Cruciate ligament
-    "condition_707",  # Bloat
-    "condition_1312", # Hypothyroidism
-    "condition_1304", # Hypoadrenocorticism
-    "condition_1305", # Hyperadrenocorticism
-    "condition_511",  # Cardiomyopathy
-    
-    # Additional diseases of interest
-    "condition_202",  # Ear infection
-    "condition_916",  # UTI
-    "condition_109",  # Corneal ulcer
-    "condition_104",  # KCS
-    "condition_112",  # Entropion
-    "condition_311"   # Retained deciduous teeth
-)
-
-# Create list of all disease columns for analysis
-all_diseases <- c(
-    "hs_cancer_types_mast_cell_tumor",
-    paste0("condition_", reference$Code.from.DAP.data[reference$Code.from.DAP.data != "hs_cancer_types_mast_cell_tumor"])
-)
-
-# Function to fit model and extract results
-fit_breed_model <- function(disease, data) {
-  # Skip if disease column doesn't exist in data
-  if(!(disease %in% names(data))) return(NULL)
-  
-  # Fit model with purebred status as predictor, adjusting for covariates
-  formula <- as.formula(paste(disease, "~ purebred + age + weight + sex_2 + sex_3 + sex_4"))
-  model <- glm(formula, family = binomial(link = "logit"), data = data)
-  
-  # Extract results for purebred coefficient
-  coef <- summary(model)$coefficients["purebredPure", ]
-  odds_ratio <- exp(coef["Estimate"])
-  ci <- exp(coef["Estimate"] + c(-1,1) * 1.96 * coef["Std. Error"])
-  
-  # Return formatted results
-  return(data.frame(
-    Disease = disease,
-    Estimate = coef["Estimate"],
-    StdError = coef["Std. Error"],
-    OddsRatio = odds_ratio,
-    CI_Lower = ci[1],
-    CI_Upper = ci[2],
-    P_Value = coef["Pr(>|z|)"]
-  ))
-}
-
-# Create empty lists to store model results
-models <- list()
-results <- data.frame(
-  Disease = character(),
-  Estimate = numeric(),
-  StdError = numeric(),
-  OddsRatio = numeric(),
-  CI_Lower = numeric(),
-  CI_Upper = numeric(),
-  P_Value = numeric(),
-  stringsAsFactors = FALSE
-)
-
-# Run logistic regression models for each disease
-for(disease in all_diseases) {
-  result <- fit_breed_model(disease, diseases_data)
-  if(!is.null(result)) {
-    results <- rbind(results, result)
-    models[[disease]] <- result
-  }
-}
-
-# Apply Benjamini-Hochberg correction for multiple testing
-results$P_Adjusted <- p.adjust(results$P_Value, method = "BH")
-
-# Add disease prevalence by breed type
-results <- results %>%
-  mutate(
-    Prevalence_Mixed = sapply(Disease, function(d) {
-      mean(diseases_data[diseases_data$purebred == "Mixed", d], na.rm = TRUE)
-    }),
-    Prevalence_Pure = sapply(Disease, function(d) {
-      mean(diseases_data[diseases_data$purebred == "Pure", d], na.rm = TRUE)
-    })
-  )
-
-# Format disease names using the reference table
-results_formatted <- results %>%
-  mutate(
-    Disease = sapply(Disease, function(d) {
-      if(grepl("condition_", d)) {
-        code <- sub("condition_", "", d)
-        match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
-        if(length(match) > 0) return(match)
-      }
-      if(grepl("hs_cancer_types_", d)) {
-        cancer_name <- gsub("hs_cancer_types_", "", d)
-        cancer_name <- gsub("_", " ", cancer_name)
-        return(paste0(toupper(substr(cancer_name, 1, 1)), 
-                     substr(cancer_name, 2, nchar(cancer_name))))
-      }
-      return(d)
-    })
-  ) %>%
-  arrange(P_Adjusted) %>%
-  mutate(
-    Risk_Category = case_when(
-      P_Adjusted < 0.05 & OddsRatio > 1 ~ "Higher risk in purebred",
-      P_Adjusted < 0.05 & OddsRatio < 1 ~ "Higher risk in mixed breed",
-      TRUE ~ "No significant difference"
-    )
-  )
-
-# Save results for further reference
-write.csv(results_formatted,"./additional stats/breed_odds_ratios.csv")
-
-# Create forest plot of focus diseases
-focus_results <- results_formatted %>%
-  filter(Disease %in% sapply(focus_diseases, function(d) {
-    if(grepl("condition_", d)) {
-      code <- sub("condition_", "", d)
-      match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
-      if(length(match) > 0) return(match)
-    }
-    if(grepl("hs_cancer_types_", d)) {
-      cancer_name <- gsub("hs_cancer_types_", "", d)
-      cancer_name <- gsub("_", " ", cancer_name)
-      return(paste0(toupper(substr(cancer_name, 1, 1)), 
-                   substr(cancer_name, 2, nchar(cancer_name))))
-    }
-    return(d)
-  }))
-
-# Create forest plot
-breed_forest_plot <- ggplot(focus_results, aes(y = reorder(Disease, OddsRatio))) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
-  geom_point(aes(x = OddsRatio, color = Risk_Category), size = 3) +
-  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper, color = Risk_Category), height = 0.2) +
-  scale_x_log10(breaks = c(0.25, 0.5, 1, 2, 4), 
-                labels = c("0.25", "0.5", "1", "2", "4")) +
-  scale_color_manual(values = c("Higher risk in mixed breed" = "#00ABC8", 
-                                "Higher risk in purebred" = "#1B365D",
-                                "No significant difference" = "gray60")) +
-  theme_minimal() +
-  labs(x = "Odds Ratio (Purebred vs Mixed)",
-       y = "Disease",
-       color = "Risk Category") +
-  theme(
-    text = element_text(size = 12),
-    legend.position = "bottom",
-    panel.grid.minor = element_blank()
-  )
-
-# Display plot
-print(breed_forest_plot)
-
-# Save forest plot
-ggsave("./figures/breed_disease_forest_plot.tiff", 
-       breed_forest_plot, 
-       width = 10, 
-       height = 8, 
-       dpi = 600,
-       compression = "lzw")
-
-# Summarize results by risk category
-cat("Summary of Breed-Related Disease Risks:\n")
-cat("-------------------------------------\n")
-cat("Diseases with higher risk in purebred dogs:", 
-    sum(results_formatted$Risk_Category == "Higher risk in purebred"), "\n")
-cat("Diseases with higher risk in mixed breed dogs:", 
-    sum(results_formatted$Risk_Category == "Higher risk in mixed breed"), "\n")
-cat("Diseases with no significant difference:", 
-    sum(results_formatted$Risk_Category == "No significant difference"), "\n\n")
-
-# Print top 5 diseases with highest purebred odds ratios
-cat("Top 5 diseases with highest risk in purebred dogs:\n")
-results_formatted %>%
-  filter(Risk_Category == "Higher risk in purebred") %>%
-  arrange(desc(OddsRatio)) %>%
-  slice_head(n = 5) %>%
-  dplyr::select(Disease, OddsRatio, P_Adjusted) %>%
-  print()
-
-# Print top 5 diseases with highest mixed breed odds ratios
-cat("\nTop 5 diseases with highest risk in mixed breed dogs:\n")
-results_formatted %>%
-  filter(Risk_Category == "Higher risk in mixed breed") %>%
-  arrange(OddsRatio) %>%
-  slice_head(n = 5) %>%
-  dplyr::select(Disease, OddsRatio, P_Adjusted) %>%
-  print()
-
-```
 
 ```{r age strata network comparison}
-# Function to process dataframe and create standardized edge IDs
-# This ensures consistent comparison across networks
+# Clean reference table
+reference <- read.csv("./frequency tables/disease_frequencies_unstrat.csv") %>%
+  select(Code.from.DAP.data, Disease.Name) %>%
+  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
+
+# Map function with fallback
+map_disease_name <- function(code) {
+  clean_code <- sub("^condition_", "", code)
+  ref <- reference$Disease.Name[reference$Code.from.DAP.data == clean_code]
+  if (length(ref) == 1) return(ref)
+  return(code)
+}
+
+# Get numeric part for ordering
+get_code_number <- function(code) {
+  as.numeric(sub("^condition_", "", code))
+}
+
+# Full edge standardization with consistent ordering
 process_pairs <- function(df) {
   df %>%
-    dplyr::select(Disease1, Disease2) %>%
-    rowwise() %>%
     mutate(
-      sorted_pair = paste(sort(c(Disease1, Disease2)), collapse = "-")
+      code1 = as.numeric(sub("^condition_", "", Disease1)),
+      code2 = as.numeric(sub("^condition_", "", Disease2)),
+      code_left  = pmin(code1, code2),
+      code_right = pmax(code1, code2),
+      sorted_pair = paste(code_left, code_right, sep = "-")
     ) %>%
-    ungroup() %>%
     pull(sorted_pair)
 }
 
@@ -351,6 +154,8 @@ overlap_df %>%
 
 # Save heatmap figure
 ggsave("./figures/Fig_2d.tiff", width = 8, height = 6, dpi = 600, compression = "lzw")
+
+ggsave("./figures/Fig_2d.png", width = 8, height = 6, dpi = 600)
 ```
 
 
@@ -501,6 +306,163 @@ cat("\nShared among all age groups (but not in unstratified network):", length(a
 if(length(all_age_shared) > 0) print(all_age_shared)
 
 ```
+
+```{r}
+# Compute senior-specific edges
+senior_specific_edges <- setdiff(
+  senior_edges,
+  union(mature_edges, young_edges)
+)
+
+# Output summary
+cat("Number of edges unique to senior group (vs mature + young adult):", 
+    length(senior_specific_edges), "\n")
+
+# Optional: print the edges
+print(senior_specific_edges)
+
+# Compute mature adult-specific edges
+mature_specific_edges <- setdiff(
+  mature_edges,
+  union(senior_edges, young_edges)
+)
+
+# Output summary
+cat("Number of edges unique to mature adult group (vs senior + young adult):", 
+    length(mature_specific_edges), "\n")
+
+# Optional: print the edges
+print(mature_specific_edges)
+
+# Compute young adult-specific edges
+young_specific_edges <- setdiff(
+  young_edges,
+  union(senior_edges, mature_edges)
+)
+
+# Output summary
+cat("Number of edges unique to young adult group (vs senior + mature adult):", 
+    length(young_specific_edges), "\n")
+
+# Optional: print the edges
+print(young_specific_edges)
+
+# Helper function to extract unique node IDs from edge strings
+extract_nodes <- function(edge_vector) {
+  unique(unlist(strsplit(edge_vector, "-")))
+}
+
+# Get unique nodes from each edge group
+senior_unique_nodes <- extract_nodes(senior_specific_edges)
+mature_unique_nodes <- extract_nodes(mature_specific_edges)
+young_unique_nodes <- extract_nodes(young_specific_edges)
+
+# Output
+cat("Unique nodes in senior-specific edges:\n")
+print(senior_unique_nodes)
+
+cat("\nUnique nodes in mature adult-specific edges:\n")
+print(mature_unique_nodes)
+
+cat("\nUnique nodes in young adult-specific edges:\n")
+print(young_unique_nodes)
+
+```
+```{r}
+# Lookup table with names and categories
+lookup_table <- frequency %>%
+  dplyr::select(Code.from.DAP.data, Disease.Name, Disease.Category) %>%
+  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
+
+# Lookup functions
+lookup_disease_name <- function(code_number) {
+  match <- lookup_table$Disease.Name[lookup_table$Code.from.DAP.data == as.character(code_number)]
+  if (length(match) == 1) return(match)
+  return(NA)
+}
+
+lookup_disease_category <- function(code_number) {
+  match <- lookup_table$Disease.Category[lookup_table$Code.from.DAP.data == as.character(code_number)]
+  if (length(match) == 1) return(match)
+  return(NA)
+}
+
+# Build senior-specific edge table
+senior_edge_table <- tibble(edge = senior_specific_edges) %>%
+  separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
+  mutate(
+    disease_1 = sapply(code1, lookup_disease_name),
+    category_1 = sapply(code1, lookup_disease_category),
+    disease_2 = sapply(code2, lookup_disease_name),
+    category_2 = sapply(code2, lookup_disease_category),
+    in_unstratified = ifelse(paste(code1, code2, sep = "-") %in% unstrat_edges |
+                             paste(code2, code1, sep = "-") %in% unstrat_edges,
+                             "Yes", "No")
+  ) %>%
+  select(disease_1, category_1, disease_2, category_2, in_unstratified)
+
+# Preview and save
+print(senior_edge_table)
+write.csv(senior_edge_table, "./additional stats/senior_specific_edges_with_categories.csv", row.names = FALSE)
+
+# Lookup table with names and categories
+lookup_table <- frequency %>%
+  select(Code.from.DAP.data, Disease.Name, Disease.Category) %>%
+  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
+
+# Lookup functions
+lookup_disease_name <- function(code_number) {
+  match <- lookup_table$Disease.Name[lookup_table$Code.from.DAP.data == as.character(code_number)]
+  if (length(match) == 1) return(match)
+  return(NA)
+}
+
+lookup_disease_category <- function(code_number) {
+  match <- lookup_table$Disease.Category[lookup_table$Code.from.DAP.data == as.character(code_number)]
+  if (length(match) == 1) return(match)
+  return(NA)
+}
+
+# Build senior-specific edge table
+senior_edge_table <- tibble(edge = senior_specific_edges) %>%
+  separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
+  mutate(
+    disease_1 = sapply(code1, lookup_disease_name),
+    category_1 = sapply(code1, lookup_disease_category),
+    disease_2 = sapply(code2, lookup_disease_name),
+    category_2 = sapply(code2, lookup_disease_category),
+    in_unstratified = ifelse(paste(code1, code2, sep = "-") %in% unstrat_edges |
+                             paste(code2, code1, sep = "-") %in% unstrat_edges,
+                             "Yes", "No")
+  ) %>%
+  select(disease_1, category_1, disease_2, category_2, in_unstratified)
+
+# Preview and save
+print(senior_edge_table)
+write.csv(senior_edge_table, "./additional stats/senior_specific_edges_with_categories.csv", row.names = FALSE)
+
+# Reuse the same lookup_table and functions defined above
+
+# Build mature-specific edge table
+mature_edge_table <- tibble(edge = mature_specific_edges) %>%
+  separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
+  mutate(
+    disease_1 = sapply(code1, lookup_disease_name),
+    category_1 = sapply(code1, lookup_disease_category),
+    disease_2 = sapply(code2, lookup_disease_name),
+    category_2 = sapply(code2, lookup_disease_category),
+    in_unstratified = ifelse(paste(code1, code2, sep = "-") %in% unstrat_edges |
+                             paste(code2, code1, sep = "-") %in% unstrat_edges,
+                             "Yes", "No")
+  ) %>%
+  select(disease_1, category_1, disease_2, category_2, in_unstratified)
+
+# Preview and save
+print(mature_edge_table)
+write.csv(mature_edge_table, "./additional stats/mature_specific_edges_with_categories.csv", row.names = FALSE)
+
+```
+
 
 ```{r identify edges unique to unstratified network}
 # Combine all stratified network edges
@@ -711,5 +673,232 @@ row.names(global_network_stats) <- c(
 # Print network statistics
 print(global_network_stats)
 ```
+
+```{r}
+
+# Create a reference table from frequency table for disease code lookup
+reference <- read.csv("./frequency tables/disease_frequencies_unstrat.csv") %>%
+  dplyr::select(Code.from.DAP.data, Disease.Name)
+
+# Prepare dataset for analysis: Create combined IVDD column and add derived variables
+diseases_data <- cleaned_with_healthy_dogs %>%
+  mutate(
+    purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
+    age = as.numeric(dd_age_years),
+    weight = as.numeric(dd_weight_lbs),
+    sex_2 = as.numeric(recode.sex_2),
+    sex_3 = as.numeric(recode.sex_3),
+    sex_4 = as.numeric(recode.sex_4)
+  )
+
+# Define specific diseases of interest from literature
+focus_diseases <- c(
+    # Original diseases from first analysis
+    "hs_cancer_types_mast_cell_tumor",
+    "condition_405",  # Atopic dermatitis
+    "condition_1110", # Hip dysplasia
+    "condition_1108", # Elbow dysplasia
+    "condition_1215", # Epilepsy
+    "condition_102",  # Cataracts
+    "condition_1117", # Patellar luxation
+    "condition_1105", # Cruciate ligament
+    "condition_707",  # Bloat
+    "condition_1312", # Hypothyroidism
+    "condition_1304", # Hypoadrenocorticism
+    "condition_1305", # Hyperadrenocorticism
+    "condition_511",  # Cardiomyopathy
+    # Additional diseases of interest
+    "condition_202",  # Ear infection
+    "condition_916",  # UTI
+    "condition_109",  # Corneal ulcer
+    "condition_104",  # KCS
+    "condition_112",  # Entropion
+    "condition_311"   # Retained deciduous teeth
+)
+
+# Create list of all disease columns for analysis
+all_diseases <- c(
+    "hs_cancer_types_mast_cell_tumor",
+    paste0("condition_", reference$Code.from.DAP.data[reference$Code.from.DAP.data != "hs_cancer_types_mast_cell_tumor"])
+)
+
+# Function to fit model and extract results
+fit_breed_model <- function(disease, data) {
+  # Skip if disease column doesn't exist in data
+  if(!(disease %in% names(data))) return(NULL)
+  
+  # Fit model with purebred status as predictor, adjusting for covariates
+  formula <- as.formula(paste(disease, "~ purebred + age + weight + sex_2 + sex_3 + sex_4"))
+  model <- glm(formula, family = binomial(link = "logit"), data = data)
+  
+  # Extract results for purebred coefficient
+  coef <- summary(model)$coefficients["purebredPure", ]
+  odds_ratio <- exp(coef["Estimate"])
+  ci <- exp(coef["Estimate"] + c(-1,1) * 1.96 * coef["Std. Error"])
+  
+  # Return formatted results
+  return(data.frame(
+    Disease = disease,
+    Estimate = coef["Estimate"],
+    StdError = coef["Std. Error"],
+    OddsRatio = odds_ratio,
+    CI_Lower = ci[1],
+    CI_Upper = ci[2],
+    P_Value = coef["Pr(>|z|)"]
+  ))
+}
+
+# Create empty lists to store model results
+models <- list()
+results <- data.frame(
+  Disease = character(),
+  Estimate = numeric(),
+  StdError = numeric(),
+  OddsRatio = numeric(),
+  CI_Lower = numeric(),
+  CI_Upper = numeric(),
+  P_Value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Run logistic regression models for each disease
+for(disease in all_diseases) {
+  result <- fit_breed_model(disease, diseases_data)
+  if(!is.null(result)) {
+    results <- rbind(results, result)
+    models[[disease]] <- result
+  }
+}
+
+# Apply Benjamini-Hochberg correction for multiple testing
+results$P_Adjusted <- p.adjust(results$P_Value, method = "BH")
+
+# Add disease prevalence by breed type
+results <- results %>%
+  mutate(
+    Prevalence_Mixed = sapply(Disease, function(d) {
+      mean(diseases_data[diseases_data$purebred == "Mixed", d], na.rm = TRUE)
+    }),
+    Prevalence_Pure = sapply(Disease, function(d) {
+      mean(diseases_data[diseases_data$purebred == "Pure", d], na.rm = TRUE)
+    })
+  )
+
+# Format disease names using the reference table
+results_formatted <- results %>%
+  mutate(
+    Disease = sapply(Disease, function(d) {
+      if(grepl("condition_", d)) {
+        code <- sub("condition_", "", d)
+        match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
+        if(length(match) > 0) return(match)
+      }
+      if(grepl("hs_cancer_types_", d)) {
+        cancer_name <- gsub("hs_cancer_types_", "", d)
+        cancer_name <- gsub("_", " ", cancer_name)
+        return(paste0(toupper(substr(cancer_name, 1, 1)), 
+                     substr(cancer_name, 2, nchar(cancer_name))))
+      }
+      return(d)
+    })
+  ) %>%
+  arrange(P_Adjusted) %>%
+  mutate(
+    Risk_Category = case_when(
+      P_Adjusted < 0.05 & OddsRatio > 1 ~ "Higher risk in purebred",
+      P_Adjusted < 0.05 & OddsRatio < 1 ~ "Higher risk in mixed breed",
+      TRUE ~ "No significant difference"
+    )
+  )
+
+# Save results for further reference
+write.csv(results_formatted,"./additional stats/breed_odds_ratios.csv")
+
+# Create forest plot of focus diseases
+focus_results <- results_formatted %>%
+  filter(Disease %in% sapply(focus_diseases, function(d) {
+    if(d == "ivdd_combined") {
+      return("Intervertebral disc disease (IVDD)")
+    }
+    if(grepl("condition_", d)) {
+      code <- sub("condition_", "", d)
+      match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
+      if(length(match) > 0) return(match)
+    }
+    if(grepl("hs_cancer_types_", d)) {
+      cancer_name <- gsub("hs_cancer_types_", "", d)
+      cancer_name <- gsub("_", " ", cancer_name)
+      return(paste0(toupper(substr(cancer_name, 1, 1)), 
+                   substr(cancer_name, 2, nchar(cancer_name))))
+    }
+    return(d)
+  }))
+
+# Create forest plot
+breed_forest_plot <- ggplot(focus_results, aes(y = reorder(Disease, OddsRatio))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  geom_point(aes(x = OddsRatio, color = Risk_Category), size = 3) +
+  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper, color = Risk_Category), height = 0.2) +
+  scale_x_log10(breaks = c(0.25, 0.5, 1, 2, 4), 
+                labels = c("0.25", "0.5", "1", "2", "4")) +
+  scale_color_manual(values = c("Higher risk in mixed breed" = "#00ABC8", 
+                                "Higher risk in purebred" = "#1B365D",
+                                "No significant difference" = "gray60")) +
+  theme_minimal() +
+  labs(x = "Odds Ratio (Purebred vs Mixed)",
+       y = "Disease",
+       color = "Risk Category") +
+  theme(
+    text = element_text(size = 12),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+
+# Display plot
+print(breed_forest_plot)
+
+# Save forest plot
+ggsave("./figures/breed_disease_forest_plot.tiff", 
+       breed_forest_plot, 
+       width = 10, 
+       height = 8, 
+       dpi = 600,
+       compression = "lzw")
+
+# Summarize results by risk category
+cat("Summary of Breed-Related Disease Risks:\n")
+cat("-------------------------------------\n")
+cat("Diseases with higher risk in purebred dogs:", 
+    sum(results_formatted$Risk_Category == "Higher risk in purebred"), "\n")
+cat("Diseases with higher risk in mixed breed dogs:", 
+    sum(results_formatted$Risk_Category == "Higher risk in mixed breed"), "\n")
+cat("Diseases with no significant difference:", 
+    sum(results_formatted$Risk_Category == "No significant difference"), "\n\n")
+
+# Print top 5 diseases with highest purebred odds ratios
+cat("Top 5 diseases with highest risk in purebred dogs:\n")
+results_formatted %>%
+  filter(Risk_Category == "Higher risk in purebred") %>%
+  arrange(desc(OddsRatio)) %>%
+  slice_head(n = 5) %>%
+  dplyr::select(Disease, OddsRatio, P_Adjusted) %>%
+  print()
+
+# Print top 5 diseases with highest mixed breed odds ratios
+cat("\nTop 5 diseases with highest risk in mixed breed dogs:\n")
+results_formatted %>%
+  filter(Risk_Category == "Higher risk in mixed breed") %>%
+  arrange(OddsRatio) %>%
+  slice_head(n = 5) %>%
+  dplyr::select(Disease, OddsRatio, P_Adjusted) %>%
+  print()
+
+```
+```
+
+
+
+
+
 
 
