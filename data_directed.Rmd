@@ -265,33 +265,6 @@ write.csv(check_data, "./directed network/diagnosis_date_data.csv", row.names = 
 
 ```
 
-```{r visualize medical history}
-# Create a boxplot showing medical record length vs. age at last recorded condition
-
-# Boxplot of medical record length vs Age at Last Diagnosis
-p <- ggplot(data = check_data, aes(x = age_cat, y = record_length_years, fill = age_cat)) +
-  geom_boxplot() +
-  labs(x = "Age at Last Recorded Health Condition (yrs)",
-       y = "Medical Record Length (yrs)",
-       fill = "Age Category") +
-  theme_minimal() +
-  theme(axis.title = element_text(size = 18),
-        axis.text.x = element_text(size = 16),
-        axis.text.y = element_text(size = 16),
-        legend.position = "right",
-        legend.title = element_text(size = 16),
-        legend.text = element_text(size = 14)) +
-  scale_fill_grey(start = 0.8, end = 0.2)
-
-# Display the plot
-print(p)
-
-# Save the visualization
-ggsave("./supplementary figures/S3_Fig.tiff", p, 
-       width = 9, height = 6, dpi = 600, compression ="lzw")
-
-saveRDS(p, file = "./medical_history_boxplot.rds")
-```
 
 ```{r temporal data preparation}
 # Ensure correct data types
