@@ -9,11 +9,13 @@ output: html_document
 # Load required packages for network analysis and statistical computations
 library(tidyverse)    # Data manipulation and analysis
 library(readxl)       # Read Excel files
+library(writexl)      # Write Excel files
 library(poweRlaw)     # Power law distribution fitting
 library(fitdistrplus) # Distribution fitting
 library(igraph)       # Network analysis and topology metrics
 library(caret)        # Statistical modeling functions
 library(moments)      # For skewness calculation
+library(ggforce)      # For facet_col function in coefficient visualization
 
 # Create necessary directories if they don't exist
 dir.create("./figures", showWarnings = FALSE)
@@ -21,12 +23,16 @@ dir.create("./additional stats", showWarnings = FALSE)
 dir.create("./network tables", showWarnings = FALSE)
 ```
 
+
 ```{r data loading}
 # Load previously processed data files for analysis
 # Demographic data files
 cleaned_without_healthy_dogs <- read.csv(file = "./clean data/cleaned_unstrat.csv")
 cleaned_with_healthy_dogs <- read.csv(file="./clean data/merged_data_with_healthy_dogs.csv")
 disease_frequencies <- read.csv(file = "./frequency tables/disease_frequencies_unstrat.csv")
+
+# Load coefficient data from undirected network analysis
+model_coef <- read.csv(file = "./model coefficients/coef_and_pvalues_unstrat.csv")
 
 # Network data files - pairs of comorbid conditions from different age strata
 senior_pairs <- read.csv("./pair stats/significant_pairs_senior.csv", stringsAsFactors=FALSE) %>%
@@ -40,6 +46,259 @@ puppy_pairs <- read.csv("./pair stats/significant_pairs_puppy.csv", stringsAsFac
 unstrat_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "unstratified")
 frequency<-read.csv("./frequency tables/disease_frequencies_unstrat.csv")
+```
+
+```{r coefficient visualization preprocessing}
+# Prepare coefficient data for visualization
+# This section formats the coefficients for heatmap visualization
+
+# Create formatted coefficient table
+format_coef <- model_coef %>%
+  dplyr::select(
+    Disease, Disease.Name, Disease.Category,
+    dd_age_years_Coefficient, dd_weight_lbs_Coefficient, dd_breed_pure_or_mixed_Coefficient,
+    recode.sex_2_Coefficient, recode.sex_3_Coefficient, recode.sex_4_Coefficient,
+    `X.Intercept._P_value`, dd_age_years_P_value, dd_weight_lbs_P_value, 
+    dd_breed_pure_or_mixed_P_value, recode.sex_2_P_value, recode.sex_3_P_value, 
+    recode.sex_4_P_value
+  )
+
+# Rename columns for clarity
+colnames(format_coef) <- c(
+  "Disease", "Disease.Name", "Disease.Category",
+  "Age", "Weight", "Breed", "femaleSpayed", "maleUnneutered", "maleNeutered",
+  "pIntercept", "pAge", "pWeight", "pBreed", "pFemaleSpayed", "pMaleUnneutered", "pMaleNeutered"
+)
+
+# Helper function: round and format in scientific notation if < 0.01
+format_coef_value <- function(x) {
+  x_rounded <- round(x, 2)
+  ifelse(abs(x) < 0.01 & x != 0,
+         formatC(x, format = "e", digits = 2),
+         as.character(x_rounded))
+}
+
+# Round coefficients to 2 decimal places or format in scientific notation
+sig_diseases <- format_coef %>%
+  mutate(across(
+    c(Age, Weight, Breed, femaleSpayed, maleUnneutered, maleNeutered),
+    format_coef_value
+  ))
+
+# Add significance indicators to create a display version
+sig_diseases <- sig_diseases %>%
+  mutate(
+    Age_display = case_when(
+      pAge < 0.001 ~ paste0(Age, "***"),
+      pAge < 0.01 ~ paste0(Age, "**"),
+      pAge < 0.05 ~ paste0(Age, "*"),
+      TRUE ~ as.character(Age)
+    ),
+    Weight_display = case_when(
+      pWeight < 0.001 ~ paste0(Weight, "***"),
+      pWeight < 0.01 ~ paste0(Weight, "**"),
+      pWeight < 0.05 ~ paste0(Weight, "*"),
+      TRUE ~ as.character(Weight)
+    ),
+    Breed_display = case_when(
+      pBreed < 0.001 ~ paste0(Breed, "***"),
+      pBreed < 0.01 ~ paste0(Breed, "**"),
+      pBreed < 0.05 ~ paste0(Breed, "*"),
+      TRUE ~ as.character(Breed)
+    ),
+    FemaleSpayed_display = case_when(
+      pFemaleSpayed < 0.001 ~ paste0(femaleSpayed, "***"),
+      pFemaleSpayed < 0.01 ~ paste0(femaleSpayed, "**"),
+      pFemaleSpayed < 0.05 ~ paste0(femaleSpayed, "*"),
+      TRUE ~ as.character(femaleSpayed)
+    ),
+    MaleUnneutered_display = case_when(
+      pMaleUnneutered < 0.001 ~ paste0(maleUnneutered, "***"),
+      pMaleUnneutered < 0.01 ~ paste0(maleUnneutered, "**"),
+      pMaleUnneutered < 0.05 ~ paste0(maleUnneutered, "*"),
+      TRUE ~ as.character(maleUnneutered)
+    ),
+    MaleNeutered_display = case_when(
+      pMaleNeutered < 0.001 ~ paste0(maleNeutered, "***"),
+      pMaleNeutered < 0.01 ~ paste0(maleNeutered, "**"),
+      pMaleNeutered < 0.05 ~ paste0(maleNeutered, "*"),
+      TRUE ~ as.character(maleNeutered)
+    )
+  )
+
+# Add columns for color coding
+sig_diseases <- sig_diseases %>%
+  mutate(
+    Age_color = case_when(
+      as.numeric(Age) > 0 & pAge < 0.05 ~ "pos_sig",
+      as.numeric(Age) > 0 & pAge >= 0.05 ~ "pos_nonsig",
+      as.numeric(Age) < 0 & pAge < 0.05 ~ "neg_sig",
+      as.numeric(Age) < 0 & pAge >= 0.05 ~ "neg_nonsig",
+      TRUE ~ "neutral"
+    ),
+    Weight_color = case_when(
+      as.numeric(Weight) > 0 & pWeight < 0.05 ~ "pos_sig",
+      as.numeric(Weight) > 0 & pWeight >= 0.05 ~ "pos_nonsig",
+      as.numeric(Weight) < 0 & pWeight < 0.05 ~ "neg_sig",
+      as.numeric(Weight) < 0 & pWeight >= 0.05 ~ "neg_nonsig",
+      TRUE ~ "neutral"
+    ),
+    Breed_color = case_when(
+      as.numeric(Breed) > 0 & pBreed < 0.05 ~ "pos_sig",
+      as.numeric(Breed) > 0 & pBreed >= 0.05 ~ "pos_nonsig",
+      as.numeric(Breed) < 0 & pBreed < 0.05 ~ "neg_sig",
+      as.numeric(Breed) < 0 & pBreed >= 0.05 ~ "neg_nonsig",
+      TRUE ~ "neutral"
+    ),
+    FemaleSpayed_color = case_when(
+      as.numeric(femaleSpayed) > 0 & pFemaleSpayed < 0.05 ~ "pos_sig",
+      as.numeric(femaleSpayed) > 0 & pFemaleSpayed >= 0.05 ~ "pos_nonsig",
+      as.numeric(femaleSpayed) < 0 & pFemaleSpayed < 0.05 ~ "neg_sig",
+      as.numeric(femaleSpayed) < 0 & pFemaleSpayed >= 0.05 ~ "neg_nonsig",
+      TRUE ~ "neutral"
+    ),
+    MaleUnneutered_color = case_when(
+      as.numeric(maleUnneutered) > 0 & pMaleUnneutered < 0.05 ~ "pos_sig",
+      as.numeric(maleUnneutered) > 0 & pMaleUnneutered >= 0.05 ~ "pos_nonsig",
+      as.numeric(maleUnneutered) < 0 & pMaleUnneutered < 0.05 ~ "neg_sig",
+      as.numeric(maleUnneutered) < 0 & pMaleUnneutered >= 0.05 ~ "neg_nonsig",
+      TRUE ~ "neutral"
+    ),
+    MaleNeutered_color = case_when(
+      as.numeric(maleNeutered) > 0 & pMaleNeutered < 0.05 ~ "pos_sig",
+      as.numeric(maleNeutered) > 0 & pMaleNeutered >= 0.05 ~ "pos_nonsig",
+      as.numeric(maleNeutered) < 0 & pMaleNeutered < 0.05 ~ "neg_sig",
+      as.numeric(maleNeutered) < 0 & pMaleNeutered >= 0.05 ~ "neg_nonsig",
+      TRUE ~ "neutral"
+    )
+  )
+
+# Create cleaned version for saving
+save_sig <- sig_diseases %>%
+  dplyr::select(
+    Disease.Category, Disease.Name, 
+    Age_display, Age_color, Weight_display, Weight_color,
+    Breed_display, Breed_color, FemaleSpayed_display, FemaleSpayed_color,
+    MaleUnneutered_display, MaleUnneutered_color, MaleNeutered_display, MaleNeutered_color
+  )
+
+# Save formatted coefficient data
+write_xlsx(save_sig, "./additional stats/coef_visualization.xlsx")
+write.csv(save_sig, "./additional stats/coef_visualization.csv", row.names = FALSE)
+```
+
+```{r coefficient heatmap visualization}
+# Create coefficient heatmap visualization
+
+# Define label replacements for cleaner disease names
+label_replacements <- c(
+  "Keratoconjunctivitis sicca (KCS)" = "Keratoconjunctivitis sicca",
+  "Hypertension (high blood pressure)" = "Hypertension",
+  "Lameness (chronic or recurrent)" = "Lameness",
+  "Bordatella and/or parainfluenza (kennel cough)" = "Bordatella/parainfluenza",
+  "Bordetella and/or parainfluenza (kennel cough)" = "Bordetella/parainfluenza",
+  "Cushing's disease (hyperadrenocorticism; excess adrenal function)" = "Cushing's disease",
+  "Addison's disease (hypoadrenocorticism; low adrenal function)" = "Addison's disease",
+  "Diabetes mellitus (common diabetes which causes high blood sugar)" = "Diabetes mellitus",
+  "Penetrating wound (such as a stick)" = "Penetrating wound",
+  "Head trauma due to any cause" = "Head trauma",
+  "Hearing loss (incompletely deaf)" = "Hearing loss",
+  "Dental calculus (yellow build-up on teeth)" = "Dental calculus",
+  "Gingivitis (red, puffy gums)" = "Gingivitis",
+  "Retained deciduous (baby) teeth" = "Retained deciduous teeth",
+  "Tracheal stenosis (narrowing)" = "Tracheal stenosis",
+  "Chronic or recurrent bronchitis" = "Chronic/recurrent bronchitis",
+  "Chronic or recurrent cough" = "Chronic/recurrent cough",
+  "Urinary crystals or stones in bladder or urethra" = "Urinary crystals/stones",
+  "Urinary tract infection (chronic or recurrent)" = "Urinary tract infection",
+  "Alopecia (hair loss)" = "Alopecia",
+  "Atopic dermatitis (atopy)" = "Atopic dermatitis",
+  "Pruritis (itchy skin)" = "Pruritis",
+  "Chronic or recurrent hot spots" = "Chronic/recurrent hot spots",
+  "Chronic or recurrent skin infections" = "Chronic/recurrent skin infections",
+  "Food or medicine allergies that affect the skin" = "Food/medicine allergies affecting skin",
+  "Food or medicine allergies" = "Food/medicine allergies",
+  "Chronic or recurrent diarrhea" = "Chronic/recurrent diarrhea",
+  "Chronic or recurrent vomiting" = "Chronic/recurrent vomiting",
+  "Hemorrhagic gastroenteritis (HGE) or stress colitis (acute)" = "Hemorrhagic gastroenteritis or stress colitis",
+  "Seborrhea or seborrheic dermatitis (greasy skin)" = "Seborrhea or seborrheic dermatitis"
+)
+
+# Transform data to long format for visualization
+coef_long <- save_sig %>%
+  tidyr::pivot_longer(
+    cols = c(ends_with("_display"), ends_with("_color")),
+    names_to = c("variable", ".value"),
+    names_sep = "_"
+  )
+
+# Preserve factor order for variables
+coef_long$variable <- factor(coef_long$variable, levels = c(
+  "Age", "Weight", "Breed", "FemaleSpayed", "MaleUnneutered", "MaleNeutered"
+))
+
+# Clean disease labels
+coef_long$disease_label <- dplyr::recode(coef_long$Disease.Name, !!!label_replacements)
+
+# Create the main coefficient heatmap
+coef_plot <- ggplot(data = coef_long, aes(x = variable, y = disease_label, label = display, fill = color)) +
+  geom_tile(color = "white", size = 0.5) +
+  geom_text(size = 2.5, color = "black") +
+  scale_fill_manual(
+    values = c(
+      "pos_sig" = "#1a9641",     # Dark green
+      "pos_nonsig" = "#a6d96a",  # Light green
+      "neg_nonsig" = "#fdae61",  # Light orange
+      "neg_sig" = "#d7191c"      # Dark red
+    ),
+    labels = c(
+      "pos_sig" = "Positive, significant",
+      "pos_nonsig" = "Positive, not significant", 
+      "neg_nonsig" = "Negative, not significant",
+      "neg_sig" = "Negative, significant"
+    ),
+    na.value = "#ffffbf",
+    name = "Coefficient"
+  ) +
+  scale_x_discrete(labels = c(
+    "Age (yrs)", "Weight (lbs)", "Mixed breed",
+    "Female, spayed", "Male, unneutered", "Male, neutered"
+  )) +
+  ggforce::facet_col(
+    facets = vars(Disease.Category),
+    scales = "free_y",
+    space = "free",
+    strip.position = "right"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    panel.grid = element_blank(),
+    strip.placement = "outside",
+    strip.text.y.right = element_text(angle = 0, hjust = 0),
+    strip.background = element_blank(),
+    legend.position = "bottom",
+    legend.direction = "horizontal"
+  )
+
+print(coef_plot)
+
+# Save the coefficient heatmap
+ggsave(
+  filename = "./figures/full_coef_table.tiff", 
+  plot = coef_plot, 
+  width = 10, height = 22, units = "in", 
+  dpi = 600, compression = "lzw"
+)
+
+ggsave(
+  filename = "./figures/full_coef_table.png", 
+  plot = coef_plot, 
+  width = 10, height = 22, units = "in", 
+  dpi = 600
+)
 ```
 
 ```{r network edge standardization}
@@ -183,6 +442,9 @@ ggsave("./figures/network_overlap_heatmap.png", overlap_heatmap,
 # Save overlap matrix for visualization
 write.csv(overlap_matrix, "./network tables/network_overlap_matrix.csv", row.names = TRUE)
 write.csv(overlap_df, "./network tables/network_overlap_long.csv", row.names = FALSE)
+
+# Save the ggplot object for reuse in visualization script
+saveRDS(overlap_heatmap, "./network tables/network_overlap_heatmap.rds")
 ```
 
 ```{r shared comorbidities across age groups}
