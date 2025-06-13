@@ -141,7 +141,7 @@ graph <- graph_from_data_frame(formatted_significant_pairs, directed = FALSE)
 
 # Prepare node category mapping
 node_categories <- disease_code %>%
-  mutate(node_id = as.character(Numerical.Codes)) %>%
+  dplyr::mutate(node_id = as.character(Numerical.Codes)) %>%
   dplyr::select(node_id, Disease.Category)
 
 # Identify singleton nodes within each category
@@ -178,7 +178,7 @@ unique_nodes <- unique(c(formatted_significant_pairs$Disease1, formatted_signifi
 
 node_mapping <- node_categories %>%
   filter(node_id %in% unique_nodes) %>%
-  mutate(
+  dplyr::mutate(
     collapse_category = case_when(
       node_id %in% individual_nodes ~ node_id,
       Disease.Category %in% collapse_categories ~ Disease.Category,
@@ -187,7 +187,7 @@ node_mapping <- node_categories %>%
   ) %>%
   left_join(
     disease_frequencies %>%
-      mutate(Numerical.Codes = as.character(Numerical.Codes)) %>%
+      dplyr::mutate(Numerical.Codes = as.character(Numerical.Codes)) %>%
       dplyr::select(Numerical.Codes, Disease.Name, frequency),
     by = c("node_id" = "Numerical.Codes")
   ) %>%
@@ -422,7 +422,7 @@ cat("Network styling completed:",
 # Build tidygraph layout
 graph_tbl <- as_tbl_graph(clean_graph)
 layout_tbl <- create_layout(graph_tbl, layout = "fr") %>%
-  mutate(
+  dplyr::mutate(
     node_shape = factor(ifelse(is_aggregate, 21, 16), levels = c(16, 21)),
     node_fill = ifelse(is_aggregate, NA, alpha("white", 0.6))
   )
@@ -569,7 +569,7 @@ E(ear_infection_subgraph)$edge_category <- factor(
 
 # Prepare layout and create subgraph plot
 tg_sub <- as_tbl_graph(ear_infection_subgraph) %>%
-  mutate(
+  dplyr::mutate(
     frequency = ifelse(is.na(frequency), 1, frequency),
     fontface = "plain"
   )
@@ -702,7 +702,7 @@ ggsave(
 
 # Clean disease IDs for young adult network
 significant_pairs_ya <- significant_pairs_ya %>%
-  mutate(
+  dplyr::mutate(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
@@ -715,7 +715,7 @@ young_disease_ids <- unique(c(
 
 # Prepare node metadata for young adult network
 node_info_ya <- disease_code %>%
-  mutate(node_id = as.character(Numerical.Codes)) %>%
+  dplyr::mutate(node_id = as.character(Numerical.Codes)) %>%
   filter(node_id %in% young_disease_ids) %>%
   dplyr::select(
     node_id,
@@ -724,11 +724,11 @@ node_info_ya <- disease_code %>%
   ) %>%
   left_join(
     disease_frequencies_ya %>%
-      mutate(node_id = as.character(Numerical.Codes)) %>%
+      dplyr::mutate(node_id = as.character(Numerical.Codes)) %>%
       dplyr::select(node_id, frequency),
     by = "node_id"
   ) %>%
-  mutate(
+  dplyr::mutate(
     # Reclassify toxin consumption as "Other" for consistency
     category = ifelse(category == "Toxin consumption", "Other", category)
   )
@@ -778,9 +778,9 @@ E(graph_ya)$edge_category <- edge_category_ya
 # Convert to tidygraph and attach vertex attributes
 graph_tbl_ya <- as_tbl_graph(graph_ya) %>%
   activate(edges) %>%
-  mutate(edge_category = edge_attr(graph_ya, "edge_category")) %>%
+  dplyr::mutate(edge_category = edge_attr(graph_ya, "edge_category")) %>%
   activate(nodes) %>%
-  mutate(
+  dplyr::mutate(
     disease_name = V(graph_ya)$disease_name,
     frequency = V(graph_ya)$frequency,
     category = V(graph_ya)$category,
@@ -859,7 +859,7 @@ cat("Young adult network visualization completed:",
 
 # Clean and filter significant pairs for mature adult network
 raw_pairs_ma <- significant_pairs_ma %>%
-  mutate(
+  dplyr::mutate(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
@@ -1000,7 +1000,7 @@ layout_matrix_ma_collapsed <- layout_with_fr(collapsed_graph_ma)
 
 graph_tbl_ma_collapsed <- as_tbl_graph(collapsed_graph_ma) %>%
   activate(nodes) %>%
-  mutate(
+  dplyr::mutate(
     frequency = V(collapsed_graph_ma)$frequency,
     display_category = V(collapsed_graph_ma)$display_category,
     label = V(collapsed_graph_ma)$label,
@@ -1009,7 +1009,7 @@ graph_tbl_ma_collapsed <- as_tbl_graph(collapsed_graph_ma) %>%
     node_shape = V(collapsed_graph_ma)$node_shape
   ) %>%
   activate(edges) %>%
-  mutate(edge_category = E(collapsed_graph_ma)$edge_category)
+  dplyr::mutate(edge_category = E(collapsed_graph_ma)$edge_category)
 
 graph_tbl_ma_layout_collapsed <- create_layout(
   graph_tbl_ma_collapsed,
@@ -1087,7 +1087,7 @@ cat("Mature adult collapsed network visualization completed:",
 
 # Clean and filter significant pairs for senior network
 raw_pairs_s <- significant_pairs_s %>%
-  mutate(
+  dplyr::mutate(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
@@ -1228,7 +1228,7 @@ layout_matrix_s <- layout_with_fr(collapsed_graph_s)
 
 graph_tbl_s <- as_tbl_graph(collapsed_graph_s) %>%
   activate(nodes) %>%
-  mutate(
+  dplyr::mutate(
     frequency = V(collapsed_graph_s)$frequency,
     display_category = V(collapsed_graph_s)$display_category,
     label = V(collapsed_graph_s)$label,
@@ -1237,7 +1237,7 @@ graph_tbl_s <- as_tbl_graph(collapsed_graph_s) %>%
     node_shape = V(collapsed_graph_s)$node_shape
   ) %>%
   activate(edges) %>%
-  mutate(edge_category = E(collapsed_graph_s)$edge_category)
+  dplyr::mutate(edge_category = E(collapsed_graph_s)$edge_category)
 
 graph_tbl_layout_s <- create_layout(
   graph_tbl_s,
