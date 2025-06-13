@@ -149,9 +149,9 @@ per_covariate_stats <- coefficient_stats %>%
   )
 
 # Save coefficient statistics
-write.csv(overall_stats, "./additional stats/overall_coefficient_stats.csv", row.names = FALSE)
-write.csv(per_covariate_stats, "./additional stats/per_covariate_stats.csv", row.names = FALSE)
-write.csv(coefficient_stats, "./additional stats/detailed_coefficient_stats.csv", row.names = FALSE)
+write.csv(overall_stats, "./results/statistics/overall_coefficient_stats.csv", row.names = FALSE)
+write.csv(per_covariate_stats, "./results/statistics/per_covariate_stats.csv", row.names = FALSE)
+write.csv(coefficient_stats, "./results/statistics/detailed_coefficient_stats.csv", row.names = FALSE)
 
 # Print the results
 cat("Overall coefficient statistics:\n")

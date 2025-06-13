@@ -282,7 +282,7 @@ if(file.exists("./results/statistics/diagnosis_date_data.csv")) {
   print(medical_history_boxplot)
   
   # Save for use in combined figures
-  ggsave("./outputs/figures/S3_Fig.tiff", medical_history_boxplot, 
+  ggsave("./outputs/figures/medical_history_boxplot.tiff", medical_history_boxplot, 
          width = 9, height = 6, dpi = 600, compression = "lzw")
   
 } else {
