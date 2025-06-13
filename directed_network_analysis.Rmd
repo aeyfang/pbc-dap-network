@@ -11,7 +11,6 @@ library(tidyverse)  # For data manipulation and visualization
 library(lubridate)  # For date handling
 library(furrr)      # For parallel processing
 library(haven)      # For reading SPSS/SAS data
-library(readxl)     # For reading Excel files
 library(writexl)    # For writing Excel files
 
 # Set up parallel processing for faster computation
@@ -24,7 +23,7 @@ required_dirs <- c(
   "./individual stats",
   "./pair stats", 
   "./directed network",
-  "./Cytoscape inputs",
+  "./network tables",
   "./frequency tables",
   "./reference tables"
 )
@@ -42,11 +41,8 @@ window_size <- 12 # change to 6, 24, etc. as needed
 ```
 
 ```{r data loading and prep}
-# Read in data
-
 # Load health condition data (from DAP project)
 load("./DAP_2021_HLES_health_conditions_v1.0.RData")  
-# Rename if needed
 health_condition <- HLES_health_conditions  
 
 # Load cancer condition data (from DAP project)
@@ -55,7 +51,7 @@ cancer_condition <- HLES_cancer_conditions
 
 # Standardize cancer type variables to binary format (0/1)
 cancer_condition <- cancer_condition %>%
-  mutate(across(starts_with("hs_cancer_types"), 
+  dplyr::mutate(across(starts_with("hs_cancer_types"), 
                 ~case_when(
                   tolower(as.character(.)) %in% c("true", "1") ~ 1,
                   tolower(as.character(.)) %in% c("false", "0") ~ 0,
@@ -71,41 +67,42 @@ dog_owner <- HLES_dog_owner
 cleaned_data <- read.csv("./clean data/cleaned_unstrat.csv")
 personalized_probability <- read.csv("./individual stats/probability_unstrat.csv")
 personalized_probability <- cbind(dog_id = cleaned_data$dog_id, personalized_probability)
-undirected_comorbid_pairs <- read_xlsx("./Cytoscape inputs/formatted_pairs_unstrat.xlsx")
+undirected_comorbid_pairs <- read.csv("./network tables/formatted_pairs_unstrat.csv")
 disease_frequencies <- read_csv("./frequency tables/disease_frequencies_unstrat.csv")
 ```
 
 
 ```{r data prep}
-# Create disease crosswalk
+# Create disease crosswalk mapping between codes and column names
 disease_mapping <- disease_frequencies %>%
-  mutate(
-    numerical_code = as.character(Numerical.Codes),  # just the number as string
+  dplyr::mutate(
+    numerical_code = as.character(Numerical.Codes),  # Just the number as string
     column_name = case_when(
       Disease.Category == "Cancer" ~ Code.from.DAP.data,               # e.g. "hs_cancer_types_lymphoma"
       TRUE ~ paste0("condition_", Numerical.Codes)                     # e.g. "condition_304"
     )
   ) %>%
-  select(
+  dplyr::select(
     numerical_code,     # "304", "405", etc.
     column_name,        # "condition_304" or "hs_cancer_types_lymphoma"
     Disease.Name,
     Disease.Category
   )
 
-# Clean health_condition
+# Clean and process health_condition data
+# Filter to dogs that are in cleaned_data and format condition codes
 health_condition_clean <- health_condition %>%
   # Filter to dogs that are in cleaned_data
-  filter(dog_id %in% cleaned_data$dog_id) %>%
+  dplyr::filter(dog_id %in% cleaned_data$dog_id) %>%
   
   # Ensure hs_condition is numeric to match mapping
-  mutate(hs_condition = as.numeric(hs_condition)) %>%
+  dplyr::mutate(hs_condition = as.numeric(hs_condition)) %>%
   
   # Keep only conditions in the frequency table (non-cancer)
-  filter(hs_condition %in% disease_mapping$numerical_code[disease_mapping$Disease.Category != "Cancer"]) %>%
+  dplyr::filter(hs_condition %in% disease_mapping$numerical_code[disease_mapping$Disease.Category != "Cancer"]) %>%
   
   # Format condition code and clean other fields
-  mutate(
+  dplyr::mutate(
     dog_id = as.character(dog_id),
     numerical_code = as.numeric(hs_condition),
     hs_condition = paste0("condition_", hs_condition),
@@ -113,69 +110,72 @@ health_condition_clean <- health_condition %>%
     hs_diagnosis_month = as.numeric(hs_diagnosis_month),
     source = "health"
   ) %>%
-  select(dog_id, hs_condition, numerical_code,hs_diagnosis_year, hs_diagnosis_month, source)
+  dplyr::select(dog_id, hs_condition, numerical_code, hs_diagnosis_year, hs_diagnosis_month, source)
 
-# Get valid cancer condition column names
+# Get valid cancer condition column names from disease mapping
 valid_cancer_conditions <- disease_mapping %>%
-  filter(Disease.Category == "Cancer") %>%
-  pull(column_name)
+  dplyr::filter(Disease.Category == "Cancer") %>%
+  dplyr::pull(column_name)
 
-# Clean cancer_condition
+# Clean and process cancer_condition data
 cancer_condition_clean <- cancer_condition %>%
-  # Step 1: Filter to dogs in cleaned_data
-  filter(dog_id %in% cleaned_data$dog_id) %>%
+  # Filter to dogs in cleaned_data
+  dplyr::filter(dog_id %in% cleaned_data$dog_id) %>%
   
-  # Step 2: Pivot to long format to extract cancer types
-  mutate(dog_id = as.character(dog_id)) %>%
+  # Pivot to long format to extract cancer types
+  dplyr::mutate(dog_id = as.character(dog_id)) %>%
   pivot_longer(
     cols = all_of(valid_cancer_conditions),  # Only columns that exist in mapping
     names_to = "hs_condition",
     values_to = "has_condition"
   ) %>%
   
-  # Step 3: Keep only present conditions
-  filter(has_condition == 1,
+  # Keep only present conditions
+  dplyr::filter(has_condition == 1,
          hs_condition %in% valid_cancer_conditions) %>%
   
-  # Step 4: Join to mapping and add numeric code
+  # Join to mapping and add numeric code
   left_join(disease_mapping, by = c("hs_condition" = "column_name")) %>%
-  filter(!is.na(numerical_code)) %>%
+  dplyr::filter(!is.na(numerical_code)) %>%
   
-  # Step 5: Format columns
+  # Format columns
   transmute(
     dog_id,
-    hs_condition,  # this will be something like hs_cancer_types_lymphoma
+    hs_condition,  # This will be something like hs_cancer_types_lymphoma
     numerical_code,
     hs_diagnosis_year = as.numeric(hs_initial_diagnosis_year),
     hs_diagnosis_month = as.numeric(hs_initial_diagnosis_month),
     source = "cancer"
   )
 
-# Coerce key columns in both data frames
+# Ensure consistent data types in both dataframes
 health_condition_clean <- health_condition_clean %>%
-  mutate(
+  dplyr::mutate(
     dog_id = as.character(dog_id),
     hs_condition = as.character(hs_condition),
     numerical_code = as.character(numerical_code)
   )
 
 cancer_condition_clean <- cancer_condition_clean %>%
-  mutate(
+  dplyr::mutate(
     dog_id = as.character(dog_id),
     hs_condition = as.character(hs_condition),
     numerical_code = as.character(numerical_code)
   )
 
-# Combine both dataframes into one
+# Combine both dataframes into one comprehensive condition dataset
 all_conditions <- bind_rows(health_condition_clean, cancer_condition_clean)
 
-# Remove duplicate entries
-all_conditions <- all_conditions %>% distinct()
+# Remove duplicate entries (same dog, same condition)
+all_conditions <- all_conditions %>% 
+  distinct()
+
 ```
 
 
 ```{r medical history processing}
 # Process all condition data to determine medical history length and diagnosis dates
+# This analysis examines the completeness and temporal span of medical records
 
 # Function to safely convert values to numeric, handling labelled data
 safe_as_numeric <- function(x) {
@@ -196,30 +196,30 @@ safe_date_convert <- function(x) {
 
 # Get dog ages from cleaned_data
 dog_ages <- cleaned_data %>%
-  mutate(dog_id = as.character(dog_id)) %>%
+  dplyr::mutate(dog_id = as.character(dog_id)) %>%
   dplyr::select(dog_id, dd_age_years) %>%
-  mutate(dd_age_years = safe_as_numeric(dd_age_years))
+  dplyr::mutate(dd_age_years = safe_as_numeric(dd_age_years))
 
 # Get survey completion dates from dog_owner
 survey_dates <- dog_owner %>%
-  mutate(dog_id = as.character(dog_id)) %>%
+  dplyr::mutate(dog_id = as.character(dog_id)) %>%
   dplyr::select(dog_id, st_hles_completion_date) %>%
-  mutate(st_hles_completion_date = safe_date_convert(st_hles_completion_date))
+  dplyr::mutate(st_hles_completion_date = safe_date_convert(st_hles_completion_date))
 
 # Preprocess and filter all_conditions to valid diagnosis dates only
 all_conditions_filtered <- all_conditions %>%
-  mutate(across(c(hs_diagnosis_year, hs_diagnosis_month), safe_as_numeric)) %>%
-  mutate(
+  dplyr::mutate(across(c(hs_diagnosis_year, hs_diagnosis_month), safe_as_numeric)) %>%
+  dplyr::mutate(
     hs_diagnosis_year = if_else(hs_diagnosis_year < 1900 | hs_diagnosis_year > 2023, NA_real_, hs_diagnosis_year),
     hs_diagnosis_month = if_else(hs_diagnosis_month < 1 | hs_diagnosis_month > 12, NA_real_, hs_diagnosis_month),
     date = make_date(hs_diagnosis_year, hs_diagnosis_month, 1)
   ) %>%
-  filter(!is.na(date))
+  dplyr::filter(!is.na(date))
 
 # Summarize medical history for dogs with valid dates
 medical_record_data <- all_conditions_filtered %>%
-  group_by(dog_id) %>%
-  summarise(
+  dplyr::group_by(dog_id) %>%
+  dplyr::summarise(
     earliest_date = min(date),
     latest_date = max(date),
     record_length_months = interval(earliest_date, latest_date) %/% months(1),
@@ -231,18 +231,18 @@ medical_record_data <- all_conditions_filtered %>%
 final_data <- medical_record_data %>%
   inner_join(dog_ages, by = "dog_id") %>%
   inner_join(survey_dates, by = "dog_id") %>%
-  mutate(
+  dplyr::mutate(
     years_since_latest_diagnosis = interval(latest_date, st_hles_completion_date) / years(1),
     age_at_latest_diagnosis = dd_age_years - years_since_latest_diagnosis
   )
 
-# Clean and filter
+# Clean and filter data based on quality criteria
 check_data <- final_data %>%
-  mutate(
+  dplyr::mutate(
     record_length_years = record_length_months / 12,
     age_at_latest_diagnosis = as.numeric(age_at_latest_diagnosis)
   ) %>%
-  filter(
+  dplyr::filter(
     record_length_years <= dd_age_years,
     age_at_latest_diagnosis >= 0,
     age_at_latest_diagnosis <= dd_age_years,
@@ -251,7 +251,7 @@ check_data <- final_data %>%
     valid_dates > 1,
     age_at_latest_diagnosis >= record_length_years
   ) %>%
-  mutate(
+  dplyr::mutate(
     age_cat = cut(
       age_at_latest_diagnosis,
       breaks = c(0, 3, 6, 9, 12, 15, 18, 21, Inf),
@@ -260,35 +260,36 @@ check_data <- final_data %>%
     )
   )
 
-# Save processed data
+# Save processed medical history data for visualization
 write.csv(check_data, "./directed network/diagnosis_date_data.csv", row.names = FALSE)
 
 ```
 
 
 ```{r temporal data preparation}
-# Ensure correct data types
+# Ensure correct data types for temporal analysis
 all_conditions <- all_conditions %>%
-  mutate(
+  dplyr::mutate(
     hs_diagnosis_year = as.numeric(hs_diagnosis_year),
     hs_diagnosis_month = as.numeric(hs_diagnosis_month),
     dog_id = as.numeric(dog_id)
   )
 
-# These two are worth keeping for safety
+# Ensure cleaned_data and personalized_probability have consistent dog_id types
 cleaned_data <- cleaned_data %>%
-  mutate(dog_id = as.numeric(dog_id))
+  dplyr::mutate(dog_id = as.numeric(dog_id))
 
 personalized_probability <- personalized_probability %>%
-  mutate(dog_id = as.numeric(dog_id))
+  dplyr::mutate(dog_id = as.numeric(dog_id))
+
 ```
 
-```{r}
-# ---- Utility: Map disease code to column name in cleaned_data ----
+```{r utility functions}
+# Utility function to map disease code to column name in cleaned_data
 get_column_name <- function(disease_code) {
   col_name <- disease_mapping %>%
-    filter(numerical_code == disease_code) %>%
-    pull(column_name)
+    dplyr::filter(numerical_code == disease_code) %>%
+    dplyr::pull(column_name)
 
   if (length(col_name) == 0) {
     warning(paste("No mapping found for disease code:", disease_code))
@@ -297,27 +298,29 @@ get_column_name <- function(disease_code) {
   return(col_name)
 }
 
-# ---- Utility: Get dog_ids with valid diagnosis for a given condition ----
+# Utility function to get dog_ids with valid diagnosis for a given condition
 get_dogs_with_condition <- function(condition, all_conditions) {
   all_conditions %>%
-    filter(hs_condition == condition,
+    dplyr::filter(hs_condition == condition,
            !is.na(hs_diagnosis_year),
            !is.na(hs_diagnosis_month)) %>%
-    pull(dog_id) %>%
+    dplyr::pull(dog_id) %>%
     unique()
 }
 
-# ---- Utility: Extract diagnosis timing info for a given condition ----
+# Utility function to extract diagnosis timing info for a given condition
 get_temporal_data <- function(dogs, condition, all_conditions, suffix) {
   all_conditions %>%
-    filter(dog_id %in% dogs, hs_condition == condition) %>%
-    select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
+    dplyr::filter(dog_id %in% dogs, hs_condition == condition) %>%
+    dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
     rename(!!paste0("year", suffix) := hs_diagnosis_year,
            !!paste0("month", suffix) := hs_diagnosis_month)
 }
+```
 
-# ---- Main Function: Analyze one disease pair ----
-# Analyze the temporal relationships between disease pairs
+```{r main function}
+# Main function to analyze temporal relationships between disease pairs
+# This implements the temporal extension of the Poisson binomial approach
 analyze_disease_pair <- function(disease1, disease2, 
                                  cleaned_data, 
                                  all_conditions, 
@@ -343,16 +346,16 @@ analyze_disease_pair <- function(disease1, disease2,
 
   # Find dogs with each condition using numerical_code for reliability
   dogs_disease1 <- all_conditions %>%
-    filter(numerical_code == disease1,
+    dplyr::filter(numerical_code == disease1,
            !is.na(hs_diagnosis_year), 
            !is.na(hs_diagnosis_month)) %>%
-    pull(dog_id)
+    dplyr::pull(dog_id)
   
   dogs_disease2 <- all_conditions %>%
-    filter(numerical_code == disease2,
+    dplyr::filter(numerical_code == disease2,
            !is.na(hs_diagnosis_year), 
            !is.na(hs_diagnosis_month)) %>%
-    pull(dog_id)
+    dplyr::pull(dog_id)
   
   # Identify dogs with both conditions
   dogs_with_both <- intersect(dogs_disease1, dogs_disease2)
@@ -365,20 +368,20 @@ analyze_disease_pair <- function(disease1, disease2,
   
   # Extract temporal data for both conditions
   temporal_data1 <- all_conditions %>%
-    filter(dog_id %in% dogs_with_both,
+    dplyr::filter(dog_id %in% dogs_with_both,
            numerical_code == disease1) %>%
     dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
-    mutate(year1 = hs_diagnosis_year, month1 = hs_diagnosis_month)
+    dplyr::mutate(year1 = hs_diagnosis_year, month1 = hs_diagnosis_month)
   
   temporal_data2 <- all_conditions %>%
-    filter(dog_id %in% dogs_with_both,
+    dplyr::filter(dog_id %in% dogs_with_both,
            numerical_code == disease2) %>%
     dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
-    mutate(year2 = hs_diagnosis_year, month2 = hs_diagnosis_month)
+    dplyr::mutate(year2 = hs_diagnosis_year, month2 = hs_diagnosis_month)
   
-  # Join temporal data
+  # Join temporal data and calculate timing relationships
   temporal_data <- inner_join(temporal_data1, temporal_data2, by = "dog_id") %>%
-    mutate(
+    dplyr::mutate(
       months_between = abs((year2 - year1) * 12 + (month2 - month1)),
       window_prob = case_when(
         months_between <= window_size ~ 1,
@@ -390,25 +393,24 @@ analyze_disease_pair <- function(disease1, disease2,
       )
     )
   
-  # Pull personalized probabilities
+  # Pull personalized probabilities for dogs with both conditions
   prob_data <- personalized_probability %>%
-    filter(dog_id %in% dogs_with_both) %>%
+    dplyr::filter(dog_id %in% dogs_with_both) %>%
     dplyr::select(dog_id, all_of(c(col1, col2))) %>%
-    filter((!!sym(col1) + !!sym(col2)) > 0)
+    dplyr::filter((!!sym(col1) + !!sym(col2)) > 0)
 
-  # Get disease names
+  # Get disease names for output
   disease1_name <- disease_mapping %>%
-  filter(numerical_code == as.character(disease1)) %>%
-  pull(Disease.Name) %>%
-  { if (length(.) > 0) . else "Unknown" }
+    dplyr::filter(numerical_code == as.character(disease1)) %>%
+    dplyr::pull(Disease.Name) %>%
+    { if (length(.) > 0) . else "Unknown" }
 
-disease2_name <- disease_mapping %>%
-  filter(numerical_code == as.character(disease2)) %>%
-  pull(Disease.Name) %>%
-  { if (length(.) > 0) . else "Unknown" }
+  disease2_name <- disease_mapping %>%
+    dplyr::filter(numerical_code == as.character(disease2)) %>%
+    dplyr::pull(Disease.Name) %>%
+    { if (length(.) > 0) . else "Unknown" }
 
-
-  # Final result calculation
+  # Calculate final result statistics
   results <- data.frame(
     disease1 = disease1,
     disease2 = disease2,
@@ -431,31 +433,37 @@ disease2_name <- disease_mapping %>%
   
   return(results)
 }
+```
 
-# Iterate across all comorbidity pairs
-direct_expected_counts <- future_map_dfr(1:nrow(undirected_comorbid_pairs), ~{
-  disease_pair <- undirected_comorbid_pairs[.x, ]
-  
-  result <- analyze_disease_pair(
-    disease1 = disease_pair$Disease1,
-    disease2 = disease_pair$Disease2,
-    cleaned_data = cleaned_data,
-    all_conditions = all_conditions,
-    personalized_probability = personalized_probability,
-    disease_mapping = disease_mapping, 
-    window_size = window_size
-  )
-  
-  result  # If NULL, will be skipped
-}, .options = furrr_options(seed = TRUE))
+```{r temporal analysis}
+# Iterate across all comorbidity pairs to analyze temporal relationships
+direct_expected_counts <- suppressWarnings({
+  future_map_dfr(1:nrow(undirected_comorbid_pairs), ~{
+    disease_pair <- undirected_comorbid_pairs[.x, ]
+    
+    result <- analyze_disease_pair(
+      disease1 = disease_pair$Disease1,
+      disease2 = disease_pair$Disease2,
+      cleaned_data = cleaned_data,
+      all_conditions = all_conditions,
+      personalized_probability = personalized_probability,
+      disease_mapping = disease_mapping, 
+      window_size = window_size
+    )
+    
+    result  # If NULL, will be skipped
+  }, .options = furrr_options(seed = TRUE))
+})
 
+# Save temporal analysis results
 write.csv(
   direct_expected_counts,
   sprintf("./directed network/direct_expected_and_actual_counts_%dm.csv", window_size),
   row.names = FALSE
 )
-```
 
+cat("Disease pairs analyzed:", nrow(direct_expected_counts), "\n")
+```
 
 
 ```{r calculate p-values}
@@ -496,7 +504,7 @@ results <- direct_expected_counts %>%
     outside_ci_2to1 = (count_disease2_first < ci_lower_2to1 | count_disease2_first > ci_upper_2to1)
   )
 
-# Create output for Cytoscape with both raw and adjusted p-values
+# Create output tables with both raw and adjusted p-values
 # Extract only the significant directed edges
 direct_significant_pairs <- results %>%
   # Create rows for significant 1->2 relationships using adjusted p-values
@@ -517,12 +525,11 @@ direct_significant_pairs <- results %>%
   )} %>%
   arrange(adjusted_p_value)  # Sort by adjusted p-value
 
-# Save formatted network attributes for Cytoscape
-write_xlsx(
+# Save formatted network attributes 
+write.csv(
   direct_significant_pairs, 
-  sprintf("./Cytoscape inputs/formatted_pairs_directed_%dm.xlsx", window_size)
+  sprintf("./network tables/formatted_pairs_directed_%dm.csv", window_size)
 )
-
 ```
 
 ```{r network attribute tables}
@@ -531,20 +538,20 @@ write_xlsx(
 # Create a lookup table for disease names 
 disease_crosswalk <- disease_frequencies %>%
   dplyr::select(Code = `Numerical.Codes`, Disease.Name = `Disease.Name`) %>%
-  mutate(Code = as.character(Code))  # Convert Code to character
+  dplyr::mutate(Code = as.character(Code))  # Ensure Code is character
 
 # Add disease names to the Cytoscape edges
 crosswalk_table <- direct_significant_pairs %>%
-  mutate(
-    source = as.character(source),  # Ensure source is character
-    target = as.character(target)   # Ensure target is character
+  dplyr::mutate(
+    source = as.character(source),  # Convert to character
+    target = as.character(target)   # Convert to character
   ) %>%
   left_join(disease_crosswalk, by = c("source" = "Code")) %>%
-  rename(source_name = Disease.Name) %>%
+  dplyr::rename(source_name = Disease.Name) %>%
   left_join(disease_crosswalk, by = c("target" = "Code")) %>%
-  rename(target_name = Disease.Name)
+  dplyr::rename(target_name = Disease.Name)
 
-# Reorder columns
+# Reorder columns for clarity
 crosswalk_table <- crosswalk_table %>%
   dplyr::select(source, source_name, target, target_name, p_value)
 
@@ -553,7 +560,6 @@ write.csv(
   sprintf("./reference tables/crosswalk_direct_%dm.csv", window_size), 
   row.names = FALSE
 )
-
 
 # Create comprehensive results with one row per direction
 comprehensive_results <- results %>%
@@ -570,9 +576,9 @@ comprehensive_results <- results %>%
       ci_upper = ci_upper_1to2,
       outside_ci = outside_ci_1to2
     ) %>%
-      mutate(
-        source = disease1,
-        target = disease2,
+      dplyr::mutate(
+        source = as.character(disease1),  # Convert to character
+        target = as.character(disease2),  # Convert to character
         direction = "forward"
       ),
     
@@ -588,16 +594,16 @@ comprehensive_results <- results %>%
       ci_upper = ci_upper_2to1,
       outside_ci = outside_ci_2to1
     ) %>%
-      mutate(
-        source = disease2,
-        target = disease1,
+      dplyr::mutate(
+        source = as.character(disease2),  # Convert to character
+        target = as.character(disease1),  # Convert to character
         direction = "reverse"
       )
   )} %>%
   left_join(disease_crosswalk, by = c("source" = "Code")) %>%
-  rename(source_name = Disease.Name) %>%
+  dplyr::rename(source_name = Disease.Name) %>%
   left_join(disease_crosswalk, by = c("target" = "Code")) %>%
-  rename(target_name = Disease.Name) %>%
+  dplyr::rename(target_name = Disease.Name) %>%
   dplyr::select(
     source, source_name,
     target, target_name,
@@ -612,26 +618,24 @@ comprehensive_results <- results %>%
     ci_upper,
     outside_ci
   ) %>%
-  arrange(raw_p_value)
+  dplyr::arrange(raw_p_value)
 
-
+# Save comprehensive results
 write.csv(
   comprehensive_results, 
   sprintf("./pair stats/comprehensive_pairs_directed_%dm.csv", window_size), 
   row.names = FALSE
 )
 
-# Filter to only significant results
+# Filter to only significant results and save
 significant_comprehensive <- comprehensive_results %>%
-  filter(significant)
+  dplyr::filter(significant)
 
-# Save only significant pairs
 write.csv(
   significant_comprehensive,
   sprintf("./pair stats/significant_pairs_directed_%dm.csv", window_size),
   row.names = FALSE
 )
-
 ```
 
 

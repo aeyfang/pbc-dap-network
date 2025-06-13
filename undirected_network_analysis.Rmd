@@ -22,7 +22,7 @@ plan(multisession)
 dir.create("./model coefficients", showWarnings = FALSE, recursive = TRUE)
 dir.create("./individual stats", showWarnings = FALSE, recursive = TRUE)
 dir.create("./pair stats", showWarnings = FALSE, recursive = TRUE)
-dir.create("./Cytoscape inputs", showWarnings = FALSE, recursive = TRUE)
+dir.create("./network tables", showWarnings = FALSE, recursive = TRUE)
 dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 
 # IMPORTANT: Set this to specify which dataset to analyze
@@ -45,7 +45,7 @@ data <- data %>% dplyr::arrange(dog_id)
 
 # Create disease crosswalk table to map between codes and names
 disease_crosswalk <- disease_frequencies %>%
-  mutate(
+  dplyr::mutate(
     Code.from.DAP.data = as.character(Code.from.DAP.data),
     Code = case_when(
       startsWith(Code.from.DAP.data, "hs_cancer_types_") ~ Code.from.DAP.data,
@@ -72,7 +72,7 @@ cat("Number of diseases:", ncol(responses), "\n")
 
 ```{r helper functions}
 # Function to clean disease names for network visualization
-# Converts column names like "condition_101" to just "101" for Cytoscape
+# Converts column names like "condition_101" to just "101"
 clean_disease_name <- function(name) {
   if(startsWith(name, "condition_")) {
     return(sub("^condition_", "", name))
@@ -105,14 +105,14 @@ model_results <- future_map(responses, ~fit_logistic(.x, predictors))
 
 # Combine results into a dataframe
 coef_pvalue_df <- bind_rows(
-  imap(model_results, ~mutate(.x, Disease = .y))
+  imap(model_results, ~dplyr::mutate(.x, Disease = .y))
 )
 
 # Extract all p-values for adjustment
 all_pvalues <- coef_pvalue_df %>%
   dplyr::select(Disease, Term, P_value) %>%
   # Create unique identifier for each test
-  mutate(test_id = paste(Disease, Term, sep = "_"))
+  dplyr::mutate(test_id = paste(Disease, Term, sep = "_"))
 
 # Apply multiple testing correction
 all_pvalues$P_adjusted <- p.adjust(all_pvalues$P_value, method = "BH")  # BH for Benjamini-Hochberg
@@ -164,7 +164,7 @@ write.csv(coef_df_named,
 # Extract relevant columns from the coefficient results
 coefficient_stats <- coef_pvalue_df %>%
   filter(Term != "(Intercept)") %>%  # Remove intercept terms
-  mutate(
+  dplyr::mutate(
     # Create categories for direction and significance
     coef_category = case_when(
       Coefficient > 0 & P_value < 0.05 ~ "positive_significant",
@@ -190,7 +190,7 @@ overall_stats <- coefficient_stats %>%
     total_significant = sum(is_significant),
     significant_positive_percent = round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2)
   ) %>%
-  mutate(
+  dplyr::mutate(
     positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
     positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
     negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
@@ -212,7 +212,7 @@ per_covariate_stats <- coefficient_stats %>%
                                     round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2) 
                                   else 0
   ) %>%
-  mutate(
+  dplyr::mutate(
     positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
     positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
     negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
@@ -323,7 +323,7 @@ network_attributes <- future_map(
 # Combine results into a dataframe
 network_df <- do.call(rbind, network_attributes) %>% 
   as.data.frame() %>%
-  mutate(across(TestValue:PValue, as.numeric),
+  dplyr::mutate(across(TestValue:PValue, as.numeric),
          across(IsPositive, as.logical))
 
 # Apply multiple testing correction using Bonferroni method
@@ -340,7 +340,7 @@ significant_pairs <- network_df %>%
 
 cat("Identified", nrow(significant_pairs), "significant disease pairs\n")
 
-# Prepare for Cytoscape network visualization
+# Prepare for network visualization
 # Convert disease variable names to numerical codes
 formatted_significant_pairs <- significant_pairs %>%
   transmute(
@@ -348,35 +348,34 @@ formatted_significant_pairs <- significant_pairs %>%
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
 
-# Save both raw statistics and formatted Cytoscape input
-# The full stats go in significant_pairs_*.csv, Cytoscape input is formatted_pairs_*.xlsx
+# Save both raw statistics and formatted input
 write.csv(significant_pairs, 
           paste0("./pair stats/significant_pairs_", analysis_type, ".csv"), 
           row.names = FALSE)
-write_xlsx(formatted_significant_pairs,
-           paste0("./Cytoscape inputs/formatted_pairs_", analysis_type, ".xlsx"))
+write.csv(formatted_significant_pairs,
+           paste0("./network tables/formatted_pairs_", analysis_type, ".csv"))
 ```
 
 
 ```{r network attribute tables}
 # Create edge attribute table with disease names and p-values
-# This provides metadata for the network edges in Cytoscape visualization
+# This provides metadata for the network edges
 edge_attribute_table <- formatted_significant_pairs %>%
-  mutate(
+  dplyr::mutate(
     Disease1 = as.character(Disease1),
     Disease2 = as.character(Disease2)
   ) %>%
   # Join with disease names from frequency table
   left_join(
     disease_frequencies %>%
-      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::mutate(code = as.character(Numerical.Codes)) %>%
       dplyr::select(code, Disease.Name),  
     by = c("Disease1" = "code")
   ) %>%
   rename(Disease1_name = Disease.Name) %>%
   left_join(
     disease_frequencies %>%
-      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::mutate(code = as.character(Numerical.Codes)) %>%
       dplyr::select(code, Disease.Name),
     by = c("Disease2" = "code")
   ) %>%
@@ -391,21 +390,21 @@ write.csv(edge_attribute_table,
 # Create comprehensive attribute table with all statistics
 # This provides full details on all significant pairs for network analysis
 comprehensive_attribute_table <- network_df %>%
-  mutate(
+  dplyr::mutate(
     Disease1_key = sapply(Disease1, clean_disease_name),
     Disease2_key = sapply(Disease2, clean_disease_name)
   ) %>%
   # Join with disease frequencies for names
   left_join(
     disease_frequencies %>%
-      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::mutate(code = as.character(Numerical.Codes)) %>%
       dplyr::select(code, Disease.Name),
     by = c("Disease1_key" = "code")
   ) %>%
   rename(Disease1_name = Disease.Name) %>%
   left_join(
     disease_frequencies %>%
-      mutate(code = as.character(Numerical.Codes)) %>%
+      dplyr::mutate(code = as.character(Numerical.Codes)) %>%
       dplyr::select(code, Disease.Name),
     by = c("Disease2_key" = "code")
   ) %>%
