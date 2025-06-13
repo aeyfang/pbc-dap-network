@@ -14,9 +14,18 @@ library(webshot2)   # For saving tables as images
 library(stats)      # For statistical operations
 library(cowplot)    # For combining plots
 
-# Create necessary output directories
-dir.create("./summary statistics", showWarnings = FALSE, recursive = TRUE)
-dir.create("./supplementary figures", showWarnings = FALSE, recursive = TRUE)
+# Updated directory creation
+required_dirs <- c(
+  "./data/clean",
+  "./data/frequencies", 
+  "./results/statistics",
+  "./outputs/figures",
+  "./outputs/tables"
+)
+
+for(dir in required_dirs) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+}
 ```
 
 ```{r import and prep}
@@ -25,9 +34,9 @@ dir.create("./supplementary figures", showWarnings = FALSE, recursive = TRUE)
 # - cleaned_with_healthy_dogs: all dogs, including those with no reported disease
 # - disease_frequencies: table of disease occurrences
 
-cleaned_without_healthy_dogs <- read.csv(file = "./clean data/cleaned_unstrat.csv")
-cleaned_with_healthy_dogs <- read.csv(file = "./clean data/merged_data_with_healthy_dogs.csv")
-disease_frequencies <- read.csv(file = "./frequency tables/disease_frequencies_unstrat.csv")
+cleaned_without_healthy_dogs <- read.csv(file = "./data/clean/cleaned_unstrat.csv")
+cleaned_with_healthy_dogs <- read.csv(file = "./data/clean/merged_data_with_healthy_dogs.csv")
+disease_frequencies <- read.csv(file = "./data/frequencies/disease_frequencies_unstrat.csv")
 
 # Check if data was loaded successfully
 if(nrow(cleaned_without_healthy_dogs) == 0 || nrow(disease_frequencies) == 0) {
@@ -84,7 +93,7 @@ table1 <- cleaned_without_healthy_dogs %>%
 print(table1)
 
 # Save table for reference
-write.csv(as_tibble(table1), "./summary statistics/demographics.csv", row.names = FALSE)
+write.csv(as_tibble(table1), "./results/statistics/demographics.csv", row.names = FALSE)
 ```
 
 ```{r age and weight histograms}
@@ -113,7 +122,7 @@ weight_histogram <- ggplot(cleaned_without_healthy_dogs, aes(x = dd_weight_lbs))
 print(weight_histogram)
 
 # Save weight histogram
-ggsave("./summary statistics/weight_distribution.png", weight_histogram, 
+ggsave("./outputs/figures/weight_distribution.png", weight_histogram, 
        width = 10, height = 8, dpi = 600)
 ```
 
@@ -142,7 +151,7 @@ disease_category_plot <- ggplot(disease_category_summary,
 print(disease_category_plot)
 
 # Save the plot
-ggsave("./summary statistics/disease_category_distribution.png", 
+ggsave("./outputs/figures/disease_category_distribution.png", 
        disease_category_plot, 
        width = 12, 
        height = 8, 
@@ -183,7 +192,7 @@ top_20_diseases_plot <- ggplot(top_20_diseases,
 print(top_20_diseases_plot)
 
 # Save the plot
-ggsave("./summary statistics/top_20_diseases_distribution.png", 
+ggsave("./outputs/figures/top_20_diseases_distribution.png", 
        top_20_diseases_plot, 
        width = 14, 
        height = 8, 
@@ -229,7 +238,7 @@ cat("Dogs with 3 or more diseases:", dogs_three_or_more,
 print(total_diseases_histogram)
 
 # Save the plot
-ggsave("./summary statistics/total_diseases_distribution.png", 
+ggsave("./outputs/figures/total_diseases_distribution.png", 
        total_diseases_histogram, 
        width = 9, 
        height = 6, 
@@ -243,9 +252,9 @@ ggsave("./summary statistics/total_diseases_distribution.png",
 # Visualize medical record characteristics
 # (Analysis performed in data_directed.Rmd)
 
-if(file.exists("./directed network/diagnosis_date_data.csv")) {
+if(file.exists("./results/statistics/diagnosis_date_data.csv")) {
   
-  check_data <- read.csv("./directed network/diagnosis_date_data.csv")
+  check_data <- read.csv("./results/statistics/diagnosis_date_data.csv")
   
   # Create boxplot showing medical record length vs. age at last recorded condition
   medical_history_boxplot <- ggplot(data = check_data, 
@@ -266,11 +275,11 @@ if(file.exists("./directed network/diagnosis_date_data.csv")) {
   print(medical_history_boxplot)
   
   # Save for use in combined figures
-  ggsave("./supplementary figures/S3_Fig.tiff", medical_history_boxplot, 
+  ggsave("./outputs/figures/S3_Fig.tiff", medical_history_boxplot, 
          width = 9, height = 6, dpi = 600, compression = "lzw")
   
 } else {
-  cat("Medical history data not found. Run data_directed.Rmd first.\n")
+  cat("Medical history data not found. Run directed_network_analysis.Rmd first.\n")
 }
 ```
 
@@ -279,11 +288,11 @@ if(file.exists("./directed network/diagnosis_date_data.csv")) {
 # Create combined summary figure (Figure 1)
 # Combines medical history boxplot, conditions per dog histogram, and top diseases
 
-if(!is.null(boxplot)) {
+if(exists("medical_history_boxplot")) {
   
   # Add margin formatting and labels to each plot
   boxplot_labeled <- plot_grid(
-    boxplot +
+    medical_history_boxplot +
       theme(
         plot.margin = margin(b = 20, l = 20, r = 20, t = 30),
         axis.title.x = element_text(face = "bold", size = 24), 
@@ -300,7 +309,7 @@ if(!is.null(boxplot)) {
   
   # Total diseases histogram with label
   histogram_labeled <- plot_grid(
-    conditions_histogram +
+    total_diseases_histogram +
       theme(plot.margin = margin(l = 20, t = 20, r = 20, b = 20)),
     labels = "b)",
     label_size = 24,
@@ -309,7 +318,7 @@ if(!is.null(boxplot)) {
   
   # Top 20 diseases plot with label
   top20_labeled <- plot_grid(
-    top_20_plot +
+    top_20_diseases_plot +
       theme(plot.margin = margin(t = 20, l = 20, b = 20)),
     labels = "c)",
     label_size = 24,
@@ -335,7 +344,26 @@ if(!is.null(boxplot)) {
   print(combined_plot)
   
   # Save the combined plot as main and supplementary figures
-  gg
+  ggsave(
+    filename = "./outputs/figures/Figure_1_study_overview.png",
+    plot = combined_plot,
+    width = 16,
+    height = 12,
+    dpi = 600
+  )
+  
+  ggsave(
+    filename = "./outputs/figures/Figure_1_study_overview.tiff", 
+    plot = combined_plot,
+    width = 16,
+    height = 12,
+    dpi = 600,
+    compression = "lzw"
+  )
+  
+} else {
+  cat("Medical history boxplot not available. Cannot create combined figure.\n")
+}
 ```
 
 

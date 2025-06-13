@@ -18,12 +18,21 @@ library(furrr)      # For parallel processing
 # Set up parallel processing
 plan(multisession)
 
-# Create necessary output directories
-dir.create("./model coefficients", showWarnings = FALSE, recursive = TRUE)
-dir.create("./individual stats", showWarnings = FALSE, recursive = TRUE)
-dir.create("./pair stats", showWarnings = FALSE, recursive = TRUE)
-dir.create("./network tables", showWarnings = FALSE, recursive = TRUE)
-dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
+# Consolidated directory structure
+required_dirs <- c(
+  "./data/clean",
+  "./data/frequencies",
+  "./results/models",
+  "./results/networks",
+  "./results/statistics",
+  "./outputs/figures",
+  "./outputs/tables"
+)
+
+# Create all directories at once
+for(dir in required_dirs) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # IMPORTANT: Set this to specify which dataset to analyze
 # Options:
@@ -37,8 +46,8 @@ analysis_type <- "unstrat"
 
 ```{r data loading}
 # Import and prepare data based on analysis type
-data <- read.csv(paste0("./clean data/cleaned_", analysis_type, ".csv"))
-disease_frequencies <- read.csv(paste0("./frequency tables/disease_frequencies_", analysis_type, ".csv"))
+data <- read.csv(paste0("./data/clean/cleaned_", analysis_type, ".csv"))
+disease_frequencies <- read.csv(paste0("./data/frequencies/disease_frequencies_", analysis_type, ".csv"))
 
 # Sort data by unique identifier
 data <- data %>% dplyr::arrange(dog_id)
@@ -140,7 +149,7 @@ coef_pvalue_wide_named <- coef_pvalue_wide %>%
 
 # Save full model results (coefficients and p-values)
 write.csv(coef_pvalue_wide_named,
-          paste0("./model coefficients/coef_and_pvalues_", analysis_type, ".csv"),
+          paste0("./results/models/coef_and_pvalues_", analysis_type, ".csv"),
           row.names = FALSE)
 
 # Extract just coefficients for later use
@@ -153,7 +162,7 @@ coef_df_named <- coef_df %>%
   relocate(Disease.Name, .after = Disease)
 
 write.csv(coef_df_named,
-          paste0("./model coefficients/coef_only_", analysis_type, ".csv"),
+          paste0("./results/models/coef_only_", analysis_type, ".csv"),
           row.names = FALSE)
 ```
 
@@ -257,7 +266,7 @@ risk_scores_df <- map(risk_scores, "probabilities") %>%
 # Save individual probabilities for each disease
 # These will be used in the comorbidity network generation
 write.csv(risk_scores_df,
-          paste0("./individual stats/probability_", analysis_type, ".csv"),
+          paste0("./results/models/probability_", analysis_type, ".csv"),
           row.names = FALSE)
 ```
 
@@ -330,7 +339,7 @@ network_df <- do.call(rbind, network_attributes) %>%
 network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "bonferroni")
 
 # Save all pairwise statistics (significant or not)
-write.csv(network_df, paste0("./pair stats/all_pairs_", analysis_type, ".csv"))
+write.csv(network_df, paste0("./results/networks/all_pairs_", analysis_type, ".csv"))
 
 # Filter for significant positive associations
 # These represent pairs that are more comorbid than expected by chance
@@ -340,51 +349,44 @@ significant_pairs <- network_df %>%
 
 cat("Identified", nrow(significant_pairs), "significant disease pairs\n")
 
-# Prepare for network visualization
-# Convert disease variable names to numerical codes
-formatted_significant_pairs <- significant_pairs %>%
-  transmute(
-    Disease1 = map_chr(Disease1, clean_disease_name),
-    Disease2 = map_chr(Disease2, clean_disease_name)
-  )
-
-# Save both raw statistics and formatted input
+# Save both raw statistics
 write.csv(significant_pairs, 
-          paste0("./pair stats/significant_pairs_", analysis_type, ".csv"), 
+          paste0("./results/networks/significant_pairs_", analysis_type, ".csv"), 
           row.names = FALSE)
-write.csv(formatted_significant_pairs,
-           paste0("./network tables/formatted_pairs_", analysis_type, ".csv"))
 ```
 
 
 ```{r network attribute tables}
 # Create edge attribute table with disease names and p-values
 # This provides metadata for the network edges
-edge_attribute_table <- formatted_significant_pairs %>%
+edge_attribute_table <- significant_pairs %>%
   dplyr::mutate(
-    Disease1 = as.character(Disease1),
-    Disease2 = as.character(Disease2)
+    # Clean disease codes directly from the significant pairs
+    Disease1_clean = sapply(Disease1, clean_disease_name),
+    Disease2_clean = sapply(Disease2, clean_disease_name),
+    Disease1_clean = as.character(Disease1_clean),
+    Disease2_clean = as.character(Disease2_clean)
   ) %>%
   # Join with disease names from frequency table
   left_join(
     disease_frequencies %>%
       dplyr::mutate(code = as.character(Numerical.Codes)) %>%
       dplyr::select(code, Disease.Name),  
-    by = c("Disease1" = "code")
+    by = c("Disease1_clean" = "code")
   ) %>%
   rename(Disease1_name = Disease.Name) %>%
   left_join(
     disease_frequencies %>%
       dplyr::mutate(code = as.character(Numerical.Codes)) %>%
       dplyr::select(code, Disease.Name),
-    by = c("Disease2" = "code")
+    by = c("Disease2_clean" = "code")
   ) %>%
   rename(Disease2_name = Disease.Name) %>%
-  dplyr::select(Disease1, Disease1_name, Disease2, Disease2_name) %>%
-  cbind(pval = significant_pairs$AdjustedPValue)
+  dplyr::select(Disease1_clean, Disease1_name, Disease2_clean, Disease2_name, AdjustedPValue) %>%
+  rename(Disease1 = Disease1_clean, Disease2 = Disease2_clean, pval = AdjustedPValue)
 
 write.csv(edge_attribute_table,
-          paste0("./reference tables/edge_attributes_", analysis_type, ".csv"),
+          paste0("./results/networks/edge_attributes_", analysis_type, ".csv"),
           row.names = FALSE)
 
 # Create comprehensive attribute table with all statistics
@@ -419,7 +421,7 @@ comprehensive_attribute_table <- network_df %>%
   arrange(AdjustedPValue)
 
 write.csv(comprehensive_attribute_table,
-          paste0("./pair stats/comprehensive_edge_attributes_", analysis_type, ".csv"),
+          paste0("./results/networks/comprehensive_edge_attributes_", analysis_type, ".csv"),
           row.names = FALSE)
 
 # Summary output

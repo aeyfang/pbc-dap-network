@@ -13,8 +13,9 @@ library(miceadds)  # For loading RData files
 library(haven)  # For working with labelled data
 
 # Create necessary output directories if they don't exist
-dir.create("./clean data", showWarnings = FALSE, recursive = TRUE)
-dir.create("./frequency tables", showWarnings = FALSE, recursive = TRUE)
+dir.create("./data/clean", showWarnings = FALSE, recursive = TRUE)
+dir.create("./data/frequencies", showWarnings = FALSE, recursive = TRUE)
+dir.create("./outputs/tables", showWarnings = FALSE, recursive = TRUE)
 ```
 
 ```{r data import}
@@ -154,7 +155,7 @@ health_condition_wide <- health_condition_wide %>%
       1, 0
     )
   ) %>%
-  dplyr::dplyr::select(-condition_704)
+  dplyr::select(-condition_704)
 
 # Consolidate fracture entries (combines all bone fracture types into general fracture)
 health_condition_wide <- health_condition_wide %>%
@@ -245,7 +246,7 @@ clean_data <- function(data) {
 
 ```{r apply study criteria and save data}
 # Save full dataset including dogs with no diseases
-write.csv(merged_data, "./clean data/merged_data_with_healthy_dogs.csv", row.names = FALSE)
+write.csv(merged_data, "./data/clean/merged_data_with_healthy_dogs.csv", row.names = FALSE)
 
 # Apply filtering criteria to original dataset
 merged_data_cleaned <- clean_data(merged_data)
@@ -254,11 +255,11 @@ merged_data_cleaned <- clean_data(merged_data)
 lifestage_strata_cleaned <- lapply(lifestage_strata, clean_data)
 
 # Write the cleaned original dataset to CSV
-write.csv(merged_data_cleaned, "./clean data/cleaned_unstrat.csv", row.names = FALSE)
+write.csv(merged_data_cleaned, "./data/clean/cleaned_unstrat.csv", row.names = FALSE)
 
 # Write each cleaned stratum to a separate CSV file with simplified naming
 walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned, 
-      ~write.csv(.y, paste0("./clean data/cleaned_", .x, ".csv"), row.names = FALSE))
+      ~write.csv(.y, paste0("./data/clean/cleaned_", .x, ".csv"), row.names = FALSE))
 ```
 
 ```{r}
@@ -292,13 +293,13 @@ generate_frequency_table <- function(data, suffix = "") {
   }
   
   # Save frequency table to CSV
-  write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
+  write.csv(disease_frequencies, paste0("./data/frequencies/disease_frequencies", suffix, ".csv"), row.names = FALSE)
   
   return(disease_frequencies)
 }
 
 # Function to create supplementary tables from frequency data
-create_supplementary_tables <- function(freq_table, output_dir = "./frequency tables") {
+create_supplementary_tables <- function(freq_table, output_dir = "./outputs/tables") {
   # Create S1b Table (condition details)
   s1b_table <- freq_table %>%
     dplyr::select(
@@ -322,7 +323,7 @@ create_supplementary_tables <- function(freq_table, output_dir = "./frequency ta
 
 # Generate frequency table for overall dataset and create supplementary tables
 overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
-supplementary_tables <- create_supplementary_tables(overall_frequencies)
+supplementary_tables <- create_supplementary_tables(overall_frequencies, "./outputs/tables")
 
 # Generate frequency tables for each stratum
 strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
