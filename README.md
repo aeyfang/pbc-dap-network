@@ -132,6 +132,41 @@ The code consists of six main R Markdown scripts that should be executed in the 
 - `combined_2x2_with_heatmap_cowplot_legend.tiff`: Age comparison figure
 - `combined_directed.tiff`: Temporal relationship figure
 
+## Interactive Network Explorer
+
+In addition to the static publication figures, this repository includes an interactive Shiny application that allows users to explore the comorbidity networks in detail.
+
+### Shiny App Features
+
+The interactive network explorer provides:
+
+- **Zooming and Panning**: Navigate through the full network to examine specific regions and connections in detail
+- **Node Selection**: Pan over individual diseases to highlight their connections and view detailed information
+- **Interactive Filtering**: Filter networks by disease category, frequency thresholds, or statistical significance levels
+- **Search Functionality**: Quickly locate specific diseases or conditions of interest
+
+### Accessing the Interactive App
+
+The Shiny application can be launched directly from this repository without running the full analysis pipeline:
+
+```r
+# Run the interactive network explorer
+shiny::runApp("./shiny_app/")
+```
+
+**Note**: The required data files (`significant_pairs_unstrat.csv` and `disease_frequencies_unstrat.csv`) are included in this repository, so the interactive app can be run immediately without completing the full analysis pipeline.
+
+### Quick Start
+
+To immediately explore the networks without running any analysis:
+
+1. Clone this repository
+2. Open R/RStudio in the project directory
+3. Install required packages: `shiny`, `DT`, `visNetwork`, `dplyr`
+4. Run: `shiny::runApp("./shiny_app/")`
+
+The app will launch in your default web browser, providing instant access to the interactive comorbidity network explorer.
+
 ## Dependencies
 
 ### Required R Packages
