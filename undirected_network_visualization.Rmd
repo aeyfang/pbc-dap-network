@@ -5,51 +5,51 @@ date: "2025-04-29"
 output: html_document
 ---
 
+```{r setup}
+# Load required packages for network visualization
+library(igraph)       # Network graph creation and manipulation
+library(ggraph)       # Grammar of graphics for network visualization
+library(RColorBrewer) # Color palettes for network categories
+library(cowplot)      # Plot composition and layout
+library(tidyverse)    # Data manipulation
+library(tidygraph)    # Tidy graph data structures
+library(patchwork)    # Additional plot composition
 
-```{r}
-library(igraph)
-library(ggraph)
-library(RColorBrewer)
-library(cowplot)
-library(dplyr)
-library(purrr)
-library(tidygraph)
-library(cowplot)
-library(visNetwork)
+# Create necessary output directories
+dir.create("./network images", showWarnings = FALSE, recursive = TRUE)
 ```
 
-```{r}
-# Load significant pairs
+```{r load precomputed data}
+# Load pre-computed analysis results from previous scripts
+# Main network data
 significant_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv")
-
-disease_code<-read.csv(file = "./diseaseCodes.csv")
-
-# Load disease frequencies to help with hs_cancer_types mapping
+disease_code <- read.csv("./diseaseCodes.csv")
 disease_frequencies <- read.csv("./frequency tables/disease_frequencies_unstrat.csv")
 
-# Load young adult–specific data
+# Age-stratified network data
 significant_pairs_ya <- read.csv("./pair stats/significant_pairs_young_adult.csv")
 disease_frequencies_ya <- read.csv("./frequency tables/disease_frequencies_young_adult.csv")
 
-# Load mature-specific data
 significant_pairs_ma <- read.csv("./pair stats/significant_pairs_mature_adult.csv")
 disease_frequencies_ma <- read.csv("./frequency tables/disease_frequencies_mature_adult.csv")
 
-# Load senior-specific data
 significant_pairs_s <- read.csv("./pair stats/significant_pairs_senior.csv")
 disease_frequencies_s <- read.csv("./frequency tables/disease_frequencies_senior.csv")
 
-all_frequencies <- c(
-  disease_frequencies_ya$frequency,
-  disease_frequencies_ma$frequency,
-  disease_frequencies_s$frequency
-)
-
-freq_min <- min(all_frequencies, na.rm = TRUE)
-freq_max <- max(all_frequencies, na.rm = TRUE)
+# Load previously created figure
+p_heatmap <- readRDS("./network tables/network_overlap_heatmap.rds")
 ```
 
-```{r}
+```{r visualization constants}
+# Define consistent visual elements across all network plots
+# This ensures all networks use the same color scheme and styling
+
+# Calculate frequency ranges for consistent node sizing across all networks
+all_frequencies <- c(disease_frequencies$frequency)
+freq_min <- min(all_frequencies, na.rm = TRUE)
+freq_max <- max(all_frequencies, na.rm = TRUE)
+
+# Disease name replacements for better readability in plots
 label_replacements <- c(
   "Keratoconjunctivitis sicca (KCS)" = "Keratoconjunctivitis sicca",
   "Hypertension (high blood pressure)" = "Hypertension",
@@ -81,261 +81,689 @@ label_replacements <- c(
   "Chronic or recurrent vomiting" = "Chronic/recurrent vomiting",
   "Hemorrhagic gastroenteritis (HGE) or stress colitis (acute)" = "Hemorrhagic gastroenteritis or stress colitis",
   "Seborrhea or seborrheic dermatitis (greasy skin)" = "Seborrhea or seborrheic dermatitis",
-  "Chocolate" = "Chocolate consumption",
-  "Grapes or raisins" = "Grape/raisin consumption"
+  "Other ToxinConsumption" = "Other toxin consumption",
+  "Ear Mites" = "Ear mites"
 )
 
-# Define consistent palette for all networks
+# Define consistent category palette for all networks
 fixed_categories <- c(
   "Eye", "Ear/Nose/Throat", "Mouth/Dental/Oral", "Skin", "Respiratory",
   "Gastrointestinal", "Bone/Orthopedic", "Cardiac",
   "Infection/Parasites", "Trauma", "Kidney/Urinary", "Other"
 )
 
-# Set colors
 category_palette <- setNames(
   RColorBrewer::brewer.pal(length(fixed_categories), "Paired"),
   fixed_categories
 )
 
-# Override the color for "Kidney/Urinary"
+# Override the color for "Kidney/Urinary" for better contrast
 category_palette["Kidney/Urinary"] <- "black"
+
+cat("Visualization constants defined:",
+    "\nFrequency range:", freq_min, "to", freq_max,
+    "\nColor categories:", length(fixed_categories),
+    "\nLabel replacements:", length(label_replacements), "\n")
 ```
 
+```{r helper functions}
+# Utility functions for consistent network visualization processing
 
-```{r}
 # Function to clean disease names and convert to numerical codes
 clean_disease_name <- function(name) {
-  if(startsWith(name, "condition_")) {
-    return(sub("^condition_", "", name))
-  } else if(startsWith(name, "hs_cancer_types_")) {
+  if (startsWith(name, "condition_")) {
+    sub("^condition_", "", name)
+  } else if (startsWith(name, "hs_cancer_types_")) {
     code <- disease_frequencies %>%
       filter(Code.from.DAP.data == name) %>%
       pull(Numerical.Codes)
-    return(if(length(code) == 0) name else as.character(code))
+    if (length(code) == 0) name else as.character(code)
+  } else {
+    name
   }
-  return(name)
 }
 
-# Format significant pairs and exclude unwanted edges (these are edges that belong to generic categories like "other skin diseases")
+```
+
+```{r unstratified network main graph}
+# Create the main unstratified network with node collapsing and highlighting
+# This creates the primary visualization showing collapsed disease categories
+
+# Format significant pairs for visualization
 formatted_significant_pairs <- significant_pairs %>%
   transmute(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   ) 
+
+# Create initial graph from formatted pairs
+graph <- graph_from_data_frame(formatted_significant_pairs, directed = FALSE)
+
+# Prepare node category mapping
+node_categories <- disease_code %>%
+  mutate(node_id = as.character(Numerical.Codes)) %>%
+  dplyr::select(node_id, Disease.Category)
+
+# Identify singleton nodes within each category
+# These are nodes that have no connections within their own category
+singleton_nodes <- list()
+
+for (category in unique(node_categories$Disease.Category)) {
+  category_nodes <- node_categories %>%
+    filter(Disease.Category == category) %>%
+    pull(node_id)
+
+  subgraph <- induced_subgraph(graph, which(V(graph)$name %in% category_nodes))
+
+  for (node in V(subgraph)$name) {
+    if (degree(subgraph, node) == 0 && degree(graph, node) > 0) {
+      singleton_nodes[[category]] <- c(singleton_nodes[[category]], node)
+    }
+  }
+}
+
+# Define nodes to keep as individuals (high importance nodes)
+excluded_nodes <- c("101", "102", "404", "514", "908", "911", "1305", "1307", "1407", "202")
+individual_nodes <- c(unlist(singleton_nodes), excluded_nodes)
+
+# Define categories to collapse into aggregate nodes
+collapse_categories <- c(
+  "Eye", "Ear/Nose/Throat", "Mouth/Dental/Oral", "Skin", "Respiratory",
+  "Gastrointestinal", "Bone/Orthopedic", "Toxin Consumption",
+  "Infection/Parasites", "Trauma"
+)
+
+# Create node mapping for collapsing
+unique_nodes <- unique(c(formatted_significant_pairs$Disease1, formatted_significant_pairs$Disease2))
+
+node_mapping <- node_categories %>%
+  filter(node_id %in% unique_nodes) %>%
+  mutate(
+    collapse_category = case_when(
+      node_id %in% individual_nodes ~ node_id,
+      Disease.Category %in% collapse_categories ~ Disease.Category,
+      TRUE ~ node_id
+    )
+  ) %>%
+  left_join(
+    disease_frequencies %>%
+      mutate(Numerical.Codes = as.character(Numerical.Codes)) %>%
+      dplyr::select(Numerical.Codes, Disease.Name, frequency),
+    by = c("node_id" = "Numerical.Codes")
+  ) %>%
+  dplyr::select(node_id, collapse_category, Disease.Name, frequency)
+
+# Add collapse category and frequency to graph vertices
+V(graph)$collapse_category <- node_mapping$collapse_category[match(V(graph)$name, node_mapping$node_id)]
+V(graph)$frequency <- node_mapping$frequency[match(V(graph)$name, node_mapping$node_id)]
+
+# Contract graph to create collapsed nodes
+group_ids <- as.numeric(as.factor(V(graph)$collapse_category))
+
+collapsed_graph <- contract(
+  graph,
+  mapping = group_ids,
+  vertex.attr.comb = list(
+    frequency = "sum",
+    collapse_category = "first"
+  )
+)
+
+cat("Graph collapsing completed:",
+    "\nOriginal nodes:", vcount(graph),
+    "\nCollapsed nodes:", vcount(collapsed_graph), "\n")
 ```
 
+```{r unstratified network attributes}
+# Add comprehensive attributes to the collapsed network
+# This includes labels, node types, and display categories
 
-```{r uncollapsed unstratified network}
-# --- Plot uncollapsed, labeled network with disconnected component handling -----
+# Create labels for individual nodes
+individual_names <- node_mapping %>%
+  filter(collapse_category == node_id) %>%
+  dplyr::select(collapse_category, Disease.Name)
 
-# Build simple igraph object
-raw_graph <- graph_from_data_frame(formatted_significant_pairs, directed = FALSE)
+# Create labels for aggregate categories
+aggregate_categories <- setdiff(
+  unique(V(collapsed_graph)$collapse_category),
+  individual_names$collapse_category
+)
 
-# Add node attributes
-raw_categories <- disease_frequencies$Disease.Category[match(
-  V(raw_graph)$name,
-  as.character(disease_frequencies$Numerical.Codes)
-)]
-V(raw_graph)$category <- ifelse(
-  raw_categories %in% fixed_categories,
-  raw_categories,
+aggregate_names <- data.frame(
+  collapse_category = aggregate_categories,
+  Disease.Name = aggregate_categories,
+  stringsAsFactors = FALSE
+)
+
+# Combine all labels
+complete_mapping <- bind_rows(individual_names, aggregate_names)
+
+V(collapsed_graph)$Disease.Name <- complete_mapping$Disease.Name[
+  match(V(collapsed_graph)$collapse_category, complete_mapping$collapse_category)
+]
+
+# Add metadata about collapsed nodes
+collapsed_sizes <- node_mapping %>%
+  group_by(collapse_category) %>%
+  summarise(num_diseases_collapsed = n(), .groups = "drop")
+
+V(collapsed_graph)$num_diseases_collapsed <- collapsed_sizes$num_diseases_collapsed[
+  match(V(collapsed_graph)$collapse_category, collapsed_sizes$collapse_category)
+]
+
+original_ids <- node_mapping %>%
+  group_by(collapse_category) %>%
+  summarise(original_node_ids = paste(node_id, collapse = ", "), .groups = "drop")
+
+V(collapsed_graph)$original_node_ids <- original_ids$original_node_ids[
+  match(V(collapsed_graph)$collapse_category, original_ids$collapse_category)
+]
+
+# Assign node type (individual vs aggregate)
+V(collapsed_graph)$node_type <- ifelse(
+  V(collapsed_graph)$collapse_category %in% individual_names$collapse_category,
+  "individual", "aggregate"
+)
+
+V(collapsed_graph)$is_aggregate <- V(collapsed_graph)$node_type == "aggregate"
+
+# Assign display categories for coloring
+individual_display_category <- node_mapping %>%
+  filter(collapse_category == node_id) %>%
+  left_join(node_categories, by = "node_id") %>%
+  dplyr::select(collapse_category, display_category = Disease.Category)
+
+aggregate_display_category <- data.frame(
+  collapse_category = aggregate_categories,
+  display_category = aggregate_categories,
+  stringsAsFactors = FALSE
+)
+
+category_mapping <- bind_rows(individual_display_category, aggregate_display_category)
+
+V(collapsed_graph)$display_category <- category_mapping$display_category[
+  match(V(collapsed_graph)$collapse_category, category_mapping$collapse_category)
+]
+
+V(collapsed_graph)$original_display_category <- V(collapsed_graph)$display_category
+
+# Define categories to preserve their specific colors
+preserve_color_categories <- c(collapse_categories, "Kidney/Urinary")
+
+V(collapsed_graph)$display_category <- ifelse(
+  V(collapsed_graph)$display_category %in% preserve_color_categories,
+  V(collapsed_graph)$display_category,
   "Other"
 )
-V(raw_graph)$frequency <- disease_frequencies$frequency[match(
-  V(raw_graph)$name,
-  as.character(disease_frequencies$Numerical.Codes)
-)]
 
-# Define labels
-labeled_nodes <- c("1307", "101", "102","1305", "404", "405", "412", "514", "908", "202", "911", "407", "426", "205", "104","1407")
-V(raw_graph)$label <- ifelse(
-  V(raw_graph)$name %in% labeled_nodes,
-  disease_frequencies$Disease.Name[match(V(raw_graph)$name, as.character(disease_frequencies$Numerical.Codes))],
-  NA
+cat("Network attributes assigned:",
+    "\nIndividual nodes:", sum(V(collapsed_graph)$node_type == "individual"),
+    "\nAggregate nodes:", sum(V(collapsed_graph)$node_type == "aggregate"), "\n")
+```
+
+```{r unstratified network styling}
+# Apply visual styling and create the main network plot
+# This includes edge highlighting and proper node shapes
+
+# Prepare vertex table for cleaner processing
+vertices <- data.frame(
+  id = seq_along(V(collapsed_graph)),
+  collapse_category = V(collapsed_graph)$collapse_category,
+  display_category = V(collapsed_graph)$display_category,
+  original_display_category = V(collapsed_graph)$original_display_category,
+  Disease.Name = V(collapsed_graph)$Disease.Name,
+  node_type = V(collapsed_graph)$node_type,
+  is_aggregate = V(collapsed_graph)$is_aggregate,
+  num_diseases_collapsed = V(collapsed_graph)$num_diseases_collapsed,
+  original_node_ids = V(collapsed_graph)$original_node_ids,
+  frequency = V(collapsed_graph)$frequency
 )
-V(raw_graph)$label <- dplyr::recode(V(raw_graph)$label, !!!label_replacements)
 
-# Edge category classification
-node_cats <- V(raw_graph)$category
-edge_pairs <- igraph::ends(raw_graph, E(raw_graph), names = FALSE)
-edge_categories <- apply(edge_pairs, 1, function(pair) {
-  cat1 <- node_cats[pair[1]]
-  cat2 <- node_cats[pair[2]]
+# Rebuild clean graph from edgelist
+edges_raw <- as_edgelist(collapsed_graph, names = FALSE)
+clean_graph <- graph_from_edgelist(edges_raw, directed = FALSE)
+
+# Re-attach all attributes
+for (attr in names(vertices)[-1]) {
+  vertex_attr(clean_graph, attr) <- vertices[[attr]]
+}
+
+# Apply label replacements for better readability
+V(clean_graph)$Disease.Name <- dplyr::recode(
+  V(clean_graph)$Disease.Name,
+  !!!label_replacements
+)
+
+# Set font styling: italic for aggregate nodes
+V(clean_graph)$fontface <- ifelse(
+  V(clean_graph)$node_type == "aggregate",
+  "italic", "plain"
+)
+
+# Remove duplicate edges safely
+clean_graph <- simplify(
+  clean_graph,
+  remove.multiple = TRUE,
+  remove.loops = TRUE,
+  edge.attr.comb = list(
+    edge_category = function(x) unique(x)[1],
+    is_important = any,
+    width = max,
+    linetype = function(x) if ("11" %in% x) "11" else "solid",
+    "ignore" = "first"
+  )
+)
+
+# Classify edge categories based on original node categories
+node_cat_orig <- V(clean_graph)$original_display_category
+edge_pairs <- igraph::ends(clean_graph, E(clean_graph), names = FALSE)
+
+E(clean_graph)$edge_category <- apply(edge_pairs, 1, function(pair) {
+  cat1 <- node_cat_orig[pair[1]]
+  cat2 <- node_cat_orig[pair[2]]
+
   if (cat1 == cat2) {
-    if (cat1 %in% fixed_categories) cat1 else "Other"
+    if (cat1 %in% preserve_color_categories) {
+      cat1
+    } else {
+      "Other"
+    }
   } else {
     "Cross-category"
   }
 })
-E(raw_graph)$edge_category <- edge_categories
 
-# Build tidygraph
-raw_graph_tbl <- as_tbl_graph(raw_graph)
+# Highlight manuscript-discussed edges
+important_pairs <- list(
+  c("1307", "101"),   # Diabetes – Blindness
+  c("1305", "404"),   # Cushing's – Alopecia
+  c("514", "908"),    # Hypertension – CKD
+  c("911", "1407"),   # Proteinuria – Anemia
+  c("908", "911")     # CKD – Proteinuria
+)
 
-# --- Use single KK layout for entire graph ---
-coords <- layout_with_fr(raw_graph)
+# Convert to collapse category strings for matching
+id_to_cat <- setNames(node_mapping$collapse_category, node_mapping$node_id)
+important_strs <- map_chr(
+  map(important_pairs, ~ sort(id_to_cat[.x])),
+  paste, collapse = "_"
+)
 
-# Check connected components
-comp <- igraph::components(raw_graph)
+# Match edge pairs to highlight important connections
+vertex_cat <- V(clean_graph)$collapse_category
+edge_cats <- apply(ends(clean_graph, E(clean_graph), names = FALSE), 1, function(pair) {
+  sort(vertex_cat[pair])
+})
+edge_strs <- apply(edge_cats, 2, paste, collapse = "_")
 
-# Identify the largest component
-main_membership <- which.max(comp$csize)
+E(clean_graph)$is_important <- edge_strs %in% important_strs
 
-# Center main component at origin
-main_nodes <- which(comp$membership == main_membership)
-main_coords <- coords[main_nodes, , drop = FALSE]
-center_shift <- colMeans(main_coords)
-coords <- sweep(coords, 2, center_shift)  # Center layout
+# Special case: highlight ear infection (202) to skin aggregate connection
+v_skin <- which(V(clean_graph)$collapse_category == "Skin")
+v_202  <- which(V(clean_graph)$collapse_category == "202")
+edge_idx <- get_edge_ids(clean_graph, c(v_202, v_skin))
 
-# Optionally: shift small disconnected components slightly if they're far out
-max_dist <- 6  # threshold to shift small components closer
-for (comp_id in unique(comp$membership)) {
-  if (comp_id == main_membership) next
-  node_ids <- which(comp$membership == comp_id)
-  sub_coords <- coords[node_ids, , drop = FALSE]
-  dist_from_origin <- sqrt(rowSums((sub_coords)^2))
-  if (mean(dist_from_origin) > max_dist) {
-    coords[node_ids, ] <- coords[node_ids, ] / 2  # pull them closer
-  }
+if (edge_idx > 0) {
+  E(clean_graph)$is_important[edge_idx] <- TRUE
+  message("Edge from node 202 to Skin marked as important.")
+} else {
+  warning("Edge between 202 and Skin not found.")
 }
 
-# Build tidygraph layout
-layout_raw <- create_layout(
-  raw_graph_tbl,
-  layout = "manual",
-  x = coords[, 1],
-  y = coords[, 2]
-)
+cat("Network styling completed:",
+    "\nImportant edges highlighted:", sum(E(clean_graph)$is_important),
+    "\nEdge categories assigned\n")
+```
 
-# Plot
-p_uncollapsed <- ggraph(layout_raw) +
+```{r create main network plot}
+# Create the main collapsed network visualization
+# This is the primary figure showing the full comorbidity network
+
+# Build tidygraph layout
+graph_tbl <- as_tbl_graph(clean_graph)
+layout_tbl <- create_layout(graph_tbl, layout = "fr") %>%
+  mutate(
+    node_shape = factor(ifelse(is_aggregate, 21, 16), levels = c(16, 21)),
+    node_fill = ifelse(is_aggregate, NA, alpha("white", 0.6))
+  )
+
+# Define edge color palette including cross-category
+edge_palette <- c(category_palette, "Cross-category" = "grey38")
+
+# Create the main network plot
+p <- ggraph(layout_tbl) +
   geom_edge_link(
-    aes(color = edge_category),
-    alpha = 0.5
+    aes(
+      color = edge_category,
+      linetype = is_important,
+      width = is_important
+    ),
+    alpha = 0.6
   ) +
   geom_node_point(
-    aes(size = frequency, color = category),
-    shape = 16
-  ) +
- geom_node_label(
-  data = function(x) dplyr::filter(x, !is.na(label)),
-  aes(label = label),
-  repel = TRUE,                      # Enables repulsion
-  size = 4,                        # Text size
-  label.size = 0.3,                  # Border thickness around label box
-  label.r = unit(0.15, "lines"),     # Rounded corners
-  fill = alpha("white", 0.8),        # Background fill of label
-  color = "black",                   # Font color
-  box.padding = unit(0.4, "lines"),  # Space around the label
-  point.padding = unit(0.15, "lines"),# Space around the node
-  segment.color = "grey40",          # Connector line color
-  segment.size = 0.3,                # Connector thickness
-  segment.alpha = 0.7,               # Transparency
-  force = 0.5,                         # Repulsion strength
-  force_pull = 0.5,                  # Pull label back toward node
-  max.overlaps = Inf                 # Don’t suppress any labels
+  aes(
+    size = frequency,
+    color = display_category,
+    shape = node_shape
+  ),
+  fill = alpha("white", 0.6),
+  stroke = 1.5
 ) +
-  scale_color_manual(
-    values = c(category_palette, "Other" = "gray50", "Cross-category" = "grey38"),
-    name = "Node Category"
+  geom_node_label(
+    aes(label = Disease.Name, fontface = fontface),
+    repel = TRUE,
+    label.size = 0.3,
+    max.overlaps = Inf,
+    label.r = unit(0.15, "lines"),
+    fill = alpha("white", 0.7),
+    color = "black",
+    size = 3.5
   ) +
   scale_edge_color_manual(
-    values = c(category_palette, "Other" = "gray50", "Cross-category" = "grey38"),
-    name = "Edge Category"
+    values = edge_palette,
+    name = "Edge Category") +
+  scale_edge_linetype_manual(
+    values = c("TRUE" = "11", "FALSE" = "solid"),
+    name = "Highlighted"
   ) +
-  scale_size_continuous(name = "Frequency", range = c(2, 8)) +
-  theme_void() +
-  theme(
-  legend.text = element_text(size = 14),       
-  legend.title = element_text(size = 16)  
-)
+  scale_edge_width_manual(
+    values = c("TRUE" = 2, "FALSE" = 0.5),
+    guide = "none"
+  ) +
+  scale_shape_manual(
+  values = c(`16` = 16, `21` = 21),
+  name = "Node Type",
+  labels = c(`16` = "individual", `21` = expression(italic("aggregate")))
+) +
+  scale_color_manual(
+  values = category_palette,
+  name = "Node Category",
+  guide = guide_legend(override.aes = list(shape = 16))
+) +
+  scale_fill_manual(
+  values = c(category_palette, NA),
+  na.value = NA,
+  guide = "none"
+) +
+  scale_size_continuous(
+    name = "Frequency",
+    limits = c(freq_min, freq_max),
+    range = c(3, 9),
+    breaks = c(500, 1000, 2000, 5000, 10000)
+  ) +
+  theme_void()
 
-print(p_uncollapsed)
-
+# Save main network plot
 ggsave(
-  filename = "./network images/unstratified_network.png",
-  plot = p_uncollapsed,
+  filename = "./network images/undirected_network_graph.png",
+  plot = p,
   dpi = 600,
   width = 10,
-  height = 8.5,
+  height = 9,
+  units = "in"
+)
+
+print(p)
+```
+```{r ear infection subgraph}
+# Create detailed subgraph showing ear infection connections
+# This provides a focused view of one important disease and its neighbors
+
+# Define the target node (ear infection)
+target_node <- "202"
+
+# Ensure node exists in the original graph
+if (!(target_node %in% V(graph)$name)) {
+  stop("Node 202 not found in the graph.")
+}
+
+# Get first-degree neighbors of ear infection
+neighbor_ids <- neighbors(graph, v = target_node, mode = "all")
+subgraph_nodes <- c(target_node, V(graph)$name[neighbor_ids])
+
+# Create the ear infection subgraph
+ear_infection_subgraph <- induced_subgraph(graph, vids = subgraph_nodes)
+
+# Add display category attributes
+V(ear_infection_subgraph)$display_category <- node_mapping$collapse_category[
+  match(V(ear_infection_subgraph)$name, node_mapping$node_id)
+]
+
+# Force correct display category for ear infection node
+V(ear_infection_subgraph)$display_category[V(ear_infection_subgraph)$name == "202"] <- "Ear/Nose/Throat"
+
+# Add disease names and frequencies
+V(ear_infection_subgraph)$Disease.Name <- node_mapping$Disease.Name[
+  match(V(ear_infection_subgraph)$name, node_mapping$node_id)
+]
+
+V(ear_infection_subgraph)$frequency <- node_mapping$frequency[
+  match(V(ear_infection_subgraph)$name, node_mapping$node_id)
+]
+
+# Apply label replacements to disease names in subgraph
+V(ear_infection_subgraph)$Disease.Name <- dplyr::recode(
+  V(ear_infection_subgraph)$Disease.Name,
+  !!!label_replacements
+)
+
+# Assign edge categories consistent with main graph
+edge_pairs <- igraph::ends(ear_infection_subgraph, E(ear_infection_subgraph), names = FALSE)
+node_cats <- V(ear_infection_subgraph)$display_category
+
+E(ear_infection_subgraph)$edge_category <- apply(edge_pairs, 1, function(pair) {
+  cat1 <- node_cats[pair[1]]
+  cat2 <- node_cats[pair[2]]
+  if (!is.na(cat1) && !is.na(cat2) && cat1 == cat2) {
+    return(cat1)
+  } else {
+    return("Cross-category")
+  }
+})
+
+# Ensure factor levels align with main palette
+E(ear_infection_subgraph)$edge_category <- factor(
+  E(ear_infection_subgraph)$edge_category,
+  levels = c(names(category_palette), "Cross-category")
+)
+
+# Prepare layout and create subgraph plot
+tg_sub <- as_tbl_graph(ear_infection_subgraph) %>%
+  mutate(
+    frequency = ifelse(is.na(frequency), 1, frequency),
+    fontface = "plain"
+  )
+
+layout_sub <- create_layout(tg_sub, layout = "kk")
+
+p_sub <- ggraph(layout_sub) +
+  geom_edge_link(
+    aes(color = edge_category),
+    alpha = 0.6
+  ) +
+  geom_node_point(
+    aes(
+      size = frequency,
+      color = display_category
+    ),
+    shape = 16,
+    alpha = 0.9
+  ) +
+  geom_node_label(
+    aes(label = Disease.Name, fontface = fontface),
+    repel = TRUE,
+    label.size = 0.3,
+    label.r = unit(0.15, "lines"),
+    fill = alpha("white", 0.7),
+    color = "black",
+    size = 4
+  ) +
+  scale_color_manual(values = category_palette, name = "Node Category") +
+  scale_edge_color_manual(
+    values = c(category_palette, "Cross-category" = "grey38"),
+    name = "Edge Category"
+  ) +
+  scale_size_continuous(
+  name = "Frequency",
+  limits = c(freq_min, freq_max),
+  range = c(3, 9),
+  breaks = c(500, 1000, 2000, 5000, 10000)
+) +
+  theme_void()
+
+
+# Save main network plot
+ggsave(
+  filename = "./network images/ear_infection_subgraph.png",
+  plot = p_sub,
+  dpi = 600,
+  width = 10,
+  height = 9,
+  units = "in"
+)
+
+cat("Ear infection subgraph created:",
+    "\nSubgraph nodes:", vcount(ear_infection_subgraph),
+    "\nSubgraph edges:", ecount(ear_infection_subgraph), "\n")
+
+print(p_sub)
+```
+
+```{r combined main figure}
+# Create the main publication figure combining full network and subgraph
+# This shows both the overall network structure and detailed view
+
+# Extract legend from the full graph plot
+legend_full <- get_legend(
+  p +
+    theme(
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.title = element_text(size = 16), 
+      legend.text = element_text(size = 14)
+    )
+)
+
+# Remove legends from plots for clean composition
+p_nolegend <- p + theme(legend.position = "none")
+p_sub_nolegend <- p_sub + theme(legend.position = "none")
+
+# Create left column with proper spacing and labels
+left_column <- plot_grid(
+  plot_spacer(),     # Top padding
+  p_nolegend,
+  plot_spacer(),     # Between full and subgraph
+  p_sub_nolegend,
+  plot_spacer(),     # Bottom padding
+  ncol = 1,
+  rel_heights = c(0.03, 0.57, 0.03, 0.32, 0.05),
+  labels = c("", "a)", "", "b)", ""),
+  label_x = 0.02,
+  label_y = 1,
+  hjust = 0,
+  vjust = 1,
+  label_size = 20
+)
+
+# Create final 2-column layout with shared legend
+final_layout <- plot_grid(
+  left_column,
+  legend_full,
+  ncol = 2,
+  rel_widths = c(0.7, 0.3)
+)
+
+print(final_layout)
+
+# Save combined main figure
+ggsave(
+  filename = "./network images/final_network_layout.png",
+  plot = final_layout,
+  dpi = 600,
+  width = 12,
+  height = 15,
   units = "in"
 )
 
 ggsave(
-  filename = "./network images/unstratified_network.tiff",
-  plot = p_uncollapsed,
+  filename = "./network images/final_network_layout.tiff",
+  plot = final_layout,
   dpi = 600,
-  width = 10,
-  height = 8.5,
+  width = 12,
+  height = 15,
   units = "in",
   compression = "lzw"
 )
-
-cat("Number of nodes in unstratified network:", vcount(raw_graph), "\n")
 ```
 
-
-
 ```{r young adult network}
-# Clean disease IDs
-significant_pairs_ya <- significant_pairs_ya |>
+# Create young adult network visualization
+# Shows comorbidity patterns in early adult life stage with all nodes labeled
+
+# Clean disease IDs for young adult network
+significant_pairs_ya <- significant_pairs_ya %>%
   mutate(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
 
-# Get unique disease codes
-young_disease_ids <- unique(c(significant_pairs_ya$Disease1, significant_pairs_ya$Disease2))
+# Extract unique disease codes for this network
+young_disease_ids <- unique(c(
+  significant_pairs_ya$Disease1,
+  significant_pairs_ya$Disease2
+))
 
-# Prepare metadata
-node_info_ya <- disease_code |>
-  mutate(node_id = as.character(Numerical.Codes)) |>
-  filter(node_id %in% young_disease_ids) |>
-  dplyr::select(node_id, category = Disease.Category, disease_name = Disease.Name) |>
+# Prepare node metadata for young adult network
+node_info_ya <- disease_code %>%
+  mutate(node_id = as.character(Numerical.Codes)) %>%
+  filter(node_id %in% young_disease_ids) %>%
+  dplyr::select(
+    node_id,
+    category = Disease.Category,
+    disease_name = Disease.Name
+  ) %>%
   left_join(
-    disease_frequencies_ya |>
-      mutate(node_id = as.character(Numerical.Codes)) |>
+    disease_frequencies_ya %>%
+      mutate(node_id = as.character(Numerical.Codes)) %>%
       dplyr::select(node_id, frequency),
     by = "node_id"
   ) %>%
   mutate(
+    # Reclassify toxin consumption as "Other" for consistency
     category = ifelse(category == "Toxin consumption", "Other", category)
   )
 
-# Rebuild graph
+# Build graph from young adult pairs
 graph_ya <- graph_from_data_frame(significant_pairs_ya, directed = FALSE)
 
-# Reassign vertex attributes
-V(graph_ya)$disease_name <- node_info_ya$disease_name[match(V(graph_ya)$name, node_info_ya$node_id)]
-V(graph_ya)$category <- node_info_ya$category[match(V(graph_ya)$name, node_info_ya$node_id)]
-V(graph_ya)$frequency <- node_info_ya$frequency[match(V(graph_ya)$name, node_info_ya$node_id)]
+# Assign vertex attributes from metadata
+V(graph_ya)$disease_name <- node_info_ya$disease_name[
+  match(V(graph_ya)$name, node_info_ya$node_id)
+]
 
+V(graph_ya)$category <- node_info_ya$category[
+  match(V(graph_ya)$name, node_info_ya$node_id)
+]
+
+V(graph_ya)$frequency <- node_info_ya$frequency[
+  match(V(graph_ya)$name, node_info_ya$node_id)
+]
+
+# Apply label replacements for better readability
 V(graph_ya)$disease_name <- dplyr::recode(
   V(graph_ya)$disease_name,
   !!!label_replacements
 )
 
-# Designate labeled nodes
-labeled_nodes_ya <- c("305", "306", "412", "712", "708", "709", "1622", "1634", "423", "426", "411", "432", "1637", "1701", "1703", "405")
+# Assign node labels (label all nodes in young adult network)
+node_labels_ya <- disease_frequencies_ya$Disease.Name[
+  match(V(graph_ya)$name, as.character(disease_frequencies_ya$Numerical.Codes))
+]
 
-# Pull raw names
-node_labels_ya <- disease_frequencies_ya$Disease.Name[match(
-  V(graph_ya)$name,
-  as.character(disease_frequencies_ya$Numerical.Codes)
-)]
-
-# Add optional recoding if you have `label_replacements` defined
 node_labels_ya <- dplyr::recode(node_labels_ya, !!!label_replacements)
+V(graph_ya)$label <- node_labels_ya
 
-V(graph_ya)$label <- ifelse(
-  V(graph_ya)$name %in% labeled_nodes_ya,
-  node_labels_ya,
-  NA
-)
-
-
-# Recompute edge_category_ya
+# Compute edge categories for young adult network
 node_cat_ya <- V(graph_ya)$category
 edge_pairs_ya <- igraph::ends(graph_ya, E(graph_ya), names = FALSE)
 
@@ -345,15 +773,13 @@ edge_category_ya <- apply(edge_pairs_ya, 1, function(pair) {
   if (cat1 == cat2) cat1 else "Cross-category"
 })
 
-# Now assign safely
 E(graph_ya)$edge_category <- edge_category_ya
 
-
 # Convert to tidygraph and attach vertex attributes
-graph_tbl_ya <- as_tbl_graph(graph_ya) |>
-  activate(edges) |>
-  mutate(edge_category = edge_attr(graph_ya, "edge_category")) |>
-  activate(nodes) |>
+graph_tbl_ya <- as_tbl_graph(graph_ya) %>%
+  activate(edges) %>%
+  mutate(edge_category = edge_attr(graph_ya, "edge_category")) %>%
+  activate(nodes) %>%
   mutate(
     disease_name = V(graph_ya)$disease_name,
     frequency = V(graph_ya)$frequency,
@@ -361,11 +787,9 @@ graph_tbl_ya <- as_tbl_graph(graph_ya) |>
     label = V(graph_ya)$label
   )
 
-
-# Use graphopt layout to automatically separate components
+# Create layout for young adult network
 layout_matrix_ya <- layout_with_fr(graph_ya)
 
-# Create manual layout for ggraph
 graph_tbl_ya_layout <- create_layout(
   graph_tbl_ya,
   layout = "manual",
@@ -373,17 +797,13 @@ graph_tbl_ya_layout <- create_layout(
   y = layout_matrix_ya[, 2]
 )
 
-# Set palette
-n_cats_ya <- length(unique(V(graph_ya)$category))
-palette_ya <- brewer.pal(min(n_cats_ya, 12), "Paired")
-
-# Plot
+# Create young adult network plot
 p_ya <- ggraph(graph_tbl_ya_layout) +
   geom_edge_link(aes(color = edge_category), alpha = 0.5) +
   geom_node_point(
-  aes(size = frequency, color = category),
-  shape = 16  # 17 is the shape code for an upward-pointing triangle
-) +
+    aes(size = frequency, color = category),
+    shape = 16
+  ) +
   geom_node_label(
     aes(label = label),
     repel = TRUE,
@@ -395,30 +815,28 @@ p_ya <- ggraph(graph_tbl_ya_layout) +
     size = 4
   ) +
   scale_color_manual(
-  values = category_palette,
-  breaks = sort(names(category_palette)),
-  name = "Node Category"
-) +
+    values = category_palette,
+    breaks = sort(names(category_palette)),
+    name = "Node Category"
+  ) +
   scale_edge_color_manual(
-  values = c(category_palette, "Cross-category" = "grey38"),
-  breaks = c(sort(names(category_palette)), "Cross-category"),
-  name = "Edge Category"
-) +
+    values = c(category_palette, "Cross-category" = "grey38"),
+    breaks = c(sort(names(category_palette)), "Cross-category"),
+    name = "Edge Category"
+  ) +
   scale_size_continuous(
-  name = "Frequency",
-  limits = c(freq_min, freq_max),
-  range = c(5, 12),
-  breaks = c(500, 1000, 2000, 5000, 10000)  # adjust as fits your data
-) +
+    name = "Frequency",
+    limits = c(freq_min, freq_max),
+    range = c(4, 9),
+    breaks = c(500, 1000, 2000, 5000, 10000)
+  ) +
   theme_void() +
   theme(
     legend.text = element_text(size = 12),
     legend.title = element_text(size = 14)
   )
 
-print(p_ya)
-
-# Save plot
+# Save young adult network plot
 ggsave(
   filename = "./network images/young_adult_network_graph.png",
   plot = p_ya,
@@ -427,414 +845,505 @@ ggsave(
   height = 8,
   units = "in"
 )
-cat("Number of nodes in young adult network:", vcount(graph_ya), "\n")
+
+print(p_ya)
+
+cat("Young adult network visualization completed:",
+    "\nNodes:", vcount(graph_ya),
+    "\nEdges:", ecount(graph_ya), "\n")
 ```
 
+```{r mature adult collapsed network}
+# Create mature adult network with skin and infection/parasites collapsed
+# Shows intermediate life stage patterns with strategic node grouping
 
-```{r}
-# --- Mature Adult Network: Uncollapsed, Unlabeled ----------------------------
-
-# Clean and filter significant pairs
-raw_pairs_ma <- significant_pairs_ma |>
+# Clean and filter significant pairs for mature adult network
+raw_pairs_ma <- significant_pairs_ma %>%
   mutate(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
-  ) 
+  )
 
-# Build graph
+# Build graph from mature adult pairs
 raw_graph_ma <- graph_from_data_frame(raw_pairs_ma, directed = FALSE)
 
-# Assign categories
+# Assign node attributes from frequency data
 raw_categories_ma <- disease_frequencies_ma$Disease.Category[
   match(V(raw_graph_ma)$name, as.character(disease_frequencies_ma$Numerical.Codes))
 ]
 
-# Standardize categories to match palette
 V(raw_graph_ma)$display_category <- ifelse(
   raw_categories_ma %in% fixed_categories,
   raw_categories_ma,
   "Other"
 )
 
-# Match frequency
 V(raw_graph_ma)$frequency <- disease_frequencies_ma$frequency[
   match(V(raw_graph_ma)$name, as.character(disease_frequencies_ma$Numerical.Codes))
 ]
 
-# Designate labeled nodes
-labeled_nodes_ma <- c("101","102","305", "306", "412", "712", "708", "709", "1622", "1634", "423", "426", "411", "432", "1637", "1701", "1703", "405")
+# Get node labels and apply replacements
+node_labels_ma <- disease_frequencies_ma$Disease.Name[
+  match(V(raw_graph_ma)$name, as.character(disease_frequencies_ma$Numerical.Codes))
+]
 
-
-
-# Pull raw names
-node_labels_ma <- disease_frequencies_ma$Disease.Name[match(
-  V(raw_graph_ma)$name,
-  as.character(disease_frequencies_ma$Numerical.Codes)
-)]
-
-# Add optional recoding if you have `label_replacements` defined
 node_labels_ma <- dplyr::recode(node_labels_ma, !!!label_replacements)
+V(raw_graph_ma)$label <- node_labels_ma
 
-# Assign labels only to selected nodes
-V(raw_graph_ma)$label <- ifelse(
-  V(raw_graph_ma)$name %in% labeled_nodes_ma,
-  node_labels_ma,
-  NA
+# Define categories to collapse in mature adult network
+collapse_categories_ma <- c("Skin", "Infection/Parasites")
+
+node_id_ma <- V(raw_graph_ma)$name
+collapse_category_ma <- ifelse(
+  raw_categories_ma %in% collapse_categories_ma,
+  raw_categories_ma,
+  node_id_ma
 )
 
-# Compute edge category
-edge_pairs_ma <- igraph::ends(raw_graph_ma, E(raw_graph_ma), names = FALSE)
+V(raw_graph_ma)$collapse_category <- collapse_category_ma
+
+# Contract graph to create collapsed nodes
+group_ids_ma <- as.numeric(as.factor(collapse_category_ma))
+
+collapsed_graph_ma <- contract(
+  raw_graph_ma,
+  mapping = group_ids_ma,
+  vertex.attr.comb = list(
+    frequency = "sum",
+    display_category = "first",
+    collapse_category = "first",
+    label = function(x) x[1]
+  )
+)
+
+V(collapsed_graph_ma)$name <- V(collapsed_graph_ma)$collapse_category
+
+# Build labels for collapsed mature adult network
+individual_names_ma <- tibble(
+  collapse_category = node_id_ma,
+  label = node_labels_ma
+) %>%
+  filter(collapse_category == collapse_category_ma)
+
+aggregate_categories_ma <- setdiff(
+  unique(V(collapsed_graph_ma)$collapse_category),
+  individual_names_ma$collapse_category
+)
+
+aggregate_names_ma <- tibble(
+  collapse_category = aggregate_categories_ma,
+  label = aggregate_categories_ma
+)
+
+complete_labels_ma <- bind_rows(individual_names_ma, aggregate_names_ma)
+
+V(collapsed_graph_ma)$label <- complete_labels_ma$label[
+  match(V(collapsed_graph_ma)$collapse_category, complete_labels_ma$collapse_category)
+]
+
+# Style nodes based on type (individual vs aggregate)
+V(collapsed_graph_ma)$node_type <- ifelse(
+  V(collapsed_graph_ma)$collapse_category %in% collapse_categories_ma,
+  "aggregate", "individual"
+)
+
+V(collapsed_graph_ma)$fontface <- ifelse(
+  V(collapsed_graph_ma)$node_type == "aggregate",
+  "italic", "plain"
+)
+
+V(collapsed_graph_ma)$node_shape <- ifelse(
+  V(collapsed_graph_ma)$node_type == "aggregate",
+  21, 16
+)
+
+# Add collapse metadata for reference
+collapse_map_tbl <- tibble(
+  node_id = node_id_ma,
+  collapse_category = collapse_category_ma
+)
+
+collapsed_sizes_ma <- collapse_map_tbl %>%
+  group_by(collapse_category) %>%
+  summarise(num_diseases_collapsed = n(), .groups = "drop")
+
+original_ids_ma <- collapse_map_tbl %>%
+  group_by(collapse_category) %>%
+  summarise(original_node_ids = paste(node_id, collapse = ", "), .groups = "drop")
+
+V(collapsed_graph_ma)$num_diseases_collapsed <- collapsed_sizes_ma$num_diseases_collapsed[
+  match(V(collapsed_graph_ma)$collapse_category, collapsed_sizes_ma$collapse_category)
+]
+
+V(collapsed_graph_ma)$original_node_ids <- original_ids_ma$original_node_ids[
+  match(V(collapsed_graph_ma)$collapse_category, original_ids_ma$collapse_category)
+]
+
+# Compute edge categories safely
+edge_pairs_ma <- igraph::ends(collapsed_graph_ma, E(collapsed_graph_ma), names = FALSE)
+
 edge_categories_ma <- apply(edge_pairs_ma, 1, function(pair) {
-  cat1 <- V(raw_graph_ma)$display_category[pair[1]]
-  cat2 <- V(raw_graph_ma)$display_category[pair[2]]
+  cat1 <- V(collapsed_graph_ma)$display_category[pair[1]]
+  cat2 <- V(collapsed_graph_ma)$display_category[pair[2]]
+
+  if (is.na(cat1) || is.na(cat2)) {
+    return("Unknown")
+  }
+
   if (cat1 == cat2) cat1 else "Cross-category"
 })
-E(raw_graph_ma)$edge_category <- edge_categories_ma
 
-# Layout
-layout_matrix_ma_uncollapsed <- layout_with_fr(raw_graph_ma)
+E(collapsed_graph_ma)$edge_category <- edge_categories_ma
 
-# Convert to tidygraph
-graph_tbl_ma_uncollapsed <- as_tbl_graph(raw_graph_ma) |>
-  activate(nodes) |>
+# Create layout and tidygraph representation
+layout_matrix_ma_collapsed <- layout_with_fr(collapsed_graph_ma)
+
+graph_tbl_ma_collapsed <- as_tbl_graph(collapsed_graph_ma) %>%
+  activate(nodes) %>%
   mutate(
-    frequency = V(raw_graph_ma)$frequency,
-    display_category = V(raw_graph_ma)$display_category,
-    label = V(raw_graph_ma)$label
-  ) |>
-  activate(edges) |>
-  mutate(edge_category = E(raw_graph_ma)$edge_category)
+    frequency = V(collapsed_graph_ma)$frequency,
+    display_category = V(collapsed_graph_ma)$display_category,
+    label = V(collapsed_graph_ma)$label,
+    fontface = V(collapsed_graph_ma)$fontface,
+    node_type = V(collapsed_graph_ma)$node_type,
+    node_shape = V(collapsed_graph_ma)$node_shape
+  ) %>%
+  activate(edges) %>%
+  mutate(edge_category = E(collapsed_graph_ma)$edge_category)
 
-graph_tbl_ma_layout_uncollapsed <- create_layout(
-  graph_tbl_ma_uncollapsed,
+graph_tbl_ma_layout_collapsed <- create_layout(
+  graph_tbl_ma_collapsed,
   layout = "manual",
-  x = layout_matrix_ma_uncollapsed[, 1],
-  y = layout_matrix_ma_uncollapsed[, 2]
+  x = layout_matrix_ma_collapsed[, 1],
+  y = layout_matrix_ma_collapsed[, 2]
 )
 
-# Plot (no collapsing, no labels)
-p_ma_uncollapsed <- ggraph(graph_tbl_ma_layout_uncollapsed) +
+# Create collapsed mature adult network plot
+p_ma <- ggraph(graph_tbl_ma_layout_collapsed) +
   geom_edge_link(aes(color = edge_category), alpha = 0.5) +
   geom_node_point(
-    aes(size = frequency, color = display_category),
-    shape = 16  # triangle shape
-  ) +
-  scale_color_manual(
-  values = category_palette,
-  breaks = sort(names(category_palette)),
-  name = "Node Category"
+  aes(
+    size = frequency,
+    color = display_category,
+    shape = factor(node_shape)
+  ),
+  fill = alpha("white", 0.6),
+  stroke = 1.5
 ) +
   geom_node_label(
-  aes(label = label),
-  na.rm = TRUE,
-  repel = TRUE,
-  label.size = 0.3,
-  max.overlaps = Inf,
-  label.r = unit(0.15, "lines"),
-  fill = alpha("white", 0.7),
-  color = "black",
-  size = 4
-)+
+    aes(label = label, fontface = fontface),
+    na.rm = TRUE,
+    repel = TRUE,
+    label.size = 0.3,
+    max.overlaps = Inf,
+    label.r = unit(0.15, "lines"),
+    fill = alpha("white", 0.7),
+    color = "black",
+    size = 3
+  ) +
+  scale_color_manual(
+    values = category_palette,
+    breaks = sort(names(category_palette)),
+    name = "Node Category"
+  ) +
+  scale_shape_manual(
+    values = c(`16` = 16, `21` = 21),
+    name = "Node Type",
+    labels = c(`16` = "individual", `21` = expression(italic("aggregate")))
+  ) +
   scale_edge_color_manual(
-  values = c(category_palette, "Cross-category" = "grey38"),
-  breaks = c(sort(names(category_palette)), "Cross-category"),
-  name = "Edge Category"
-) +
+    values = c(category_palette, "Cross-category" = "grey38"),
+    breaks = c(sort(names(category_palette)), "Cross-category"),
+    name = "Edge Category"
+  ) +
   scale_size_continuous(
     name = "Frequency",
     limits = c(freq_min, freq_max),
-    range = c(5, 12),
+    range = c(4, 9),
     breaks = c(500, 1000, 2000, 5000, 10000)
   ) +
   theme_void()
 
-print(p_ma_uncollapsed)
-
-# Save
+# Save mature adult collapsed network
 ggsave(
-  filename = "./network images/mature_adult_network_graph_uncollapsed_nolabels.png",
-  plot = p_ma_uncollapsed,
+  filename = "./network images/mature_adult_network_graph_collapsed.png",
+  plot = p_ma,
   dpi = 600,
   width = 10,
   height = 8,
   units = "in"
 )
 
-cat("Number of nodes in mature_adult network:", vcount(raw_graph_ma), "\n")
+print(p_ma)
 
+cat("Mature adult collapsed network visualization completed:",
+    "\nNodes:", vcount(collapsed_graph_ma),
+    "\nEdges:", ecount(collapsed_graph_ma), "\n")
 ```
 
-```{r}
-# --- Senior Network: Uncollapsed, Unlabeled ----------------------------------
+```{r senior collapsed network}
+# Create senior network with skin and infection/parasites collapsed
+# Shows age-related comorbidity patterns in elderly dogs
 
-# Clean disease IDs
-raw_pairs_s <- significant_pairs_s |>
+# Clean and filter significant pairs for senior network
+raw_pairs_s <- significant_pairs_s %>%
   mutate(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
 
-# Build graph
+# Build graph from senior pairs
 raw_graph_s <- graph_from_data_frame(raw_pairs_s, directed = FALSE)
 
-# Assign categories
+# Assign node attributes from frequency data
 raw_categories_s <- disease_frequencies_s$Disease.Category[
   match(V(raw_graph_s)$name, as.character(disease_frequencies_s$Numerical.Codes))
 ]
 
-# Standardize to fixed palette or "Other"
 V(raw_graph_s)$display_category <- ifelse(
   raw_categories_s %in% fixed_categories,
   raw_categories_s,
   "Other"
 )
 
-# Designate labeled nodes
-labeled_nodes_s <- c("101","102","908", "514", "305", "306", "412", "712", "708", "709", "1622", "1634", "405", "423", "426", "411", "432", "1637", "426", "1701", "1703", "405")
-
-
-
-# Pull raw names
-node_labels_s <- disease_frequencies_s$Disease.Name[match(
-  V(raw_graph_s)$name,
-  as.character(disease_frequencies_s$Numerical.Codes)
-)]
-
-# Add optional recoding if you have `label_replacements` defined
-node_labels_s <- dplyr::recode(node_labels_s, !!!label_replacements)
-
-# Assign labels only to selected nodes
-V(raw_graph_s)$label <- ifelse(
-  V(raw_graph_s)$name %in% labeled_nodes_s,
-  node_labels_s,
-  NA
-)
-
-
-# Assign frequencies
 V(raw_graph_s)$frequency <- disease_frequencies_s$frequency[
   match(V(raw_graph_s)$name, as.character(disease_frequencies_s$Numerical.Codes))
 ]
 
-# Compute edge categories
-edge_pairs_s <- igraph::ends(raw_graph_s, E(raw_graph_s), names = FALSE)
-edge_categories_s <- apply(edge_pairs_s, 1, function(pair) {
-  cat1 <- V(raw_graph_s)$display_category[pair[1]]
-  cat2 <- V(raw_graph_s)$display_category[pair[2]]
-  if (cat1 == cat2) cat1 else "Cross-category"
-})
-E(raw_graph_s)$edge_category <- edge_categories_s
+# Get node labels and apply replacements
+node_labels_s <- disease_frequencies_s$Disease.Name[
+  match(V(raw_graph_s)$name, as.character(disease_frequencies_s$Numerical.Codes))
+]
 
-# Layout using Kamada-Kawai (can switch to layout_with_fr if preferred)
-layout_matrix_s_uncollapsed <- layout_with_fr(raw_graph_s)
+node_labels_s <- dplyr::recode(node_labels_s, !!!label_replacements)
+V(raw_graph_s)$label <- node_labels_s
 
-# Convert to tidygraph and attach attributes
-graph_tbl_s_uncollapsed <- as_tbl_graph(raw_graph_s) |>
-  activate(nodes) |>
-  mutate(
-    frequency = V(raw_graph_s)$frequency,
-    display_category = V(raw_graph_s)$display_category,
-    label = V(raw_graph_s)$label
-  ) |>
-  activate(edges) |>
-  mutate(edge_category = E(raw_graph_s)$edge_category)
+# Define categories to collapse in senior network
+collapse_categories_s <- c("Skin", "Infection/Parasites")
 
-graph_tbl_s_layout_uncollapsed <- create_layout(
-  graph_tbl_s_uncollapsed,
-  layout = "manual",
-  x = layout_matrix_s_uncollapsed[, 1],
-  y = layout_matrix_s_uncollapsed[, 2]
+node_id_s <- V(raw_graph_s)$name
+collapse_category_s <- ifelse(
+  raw_categories_s %in% collapse_categories_s,
+  raw_categories_s,
+  node_id_s
 )
 
-# Prepare alphabetically sorted palette
-sorted_cats_s <- sort(names(category_palette))
-edge_palette_s <- c(category_palette, "Cross-category" = "grey38")
+V(raw_graph_s)$collapse_category <- collapse_category_s
 
-# Plot
-p_s_uncollapsed <- ggraph(graph_tbl_s_layout_uncollapsed) +
+# Contract graph to create collapsed nodes
+group_ids_s <- as.numeric(as.factor(collapse_category_s))
+
+collapsed_graph_s <- contract(
+  raw_graph_s,
+  mapping = group_ids_s,
+  vertex.attr.comb = list(
+    frequency = "sum",
+    display_category = "first",
+    collapse_category = "first",
+    label = function(x) x[1]
+  )
+)
+
+V(collapsed_graph_s)$name <- V(collapsed_graph_s)$collapse_category
+
+# Build labels for collapsed senior network
+individual_names_s <- tibble(
+  collapse_category = node_id_s,
+  label = node_labels_s
+) %>%
+  filter(collapse_category == collapse_category_s)
+
+aggregate_categories_s <- setdiff(
+  unique(V(collapsed_graph_s)$collapse_category),
+  individual_names_s$collapse_category
+)
+
+aggregate_names_s <- tibble(
+  collapse_category = aggregate_categories_s,
+  label = aggregate_categories_s
+)
+
+complete_labels_s <- bind_rows(individual_names_s, aggregate_names_s)
+
+V(collapsed_graph_s)$label <- complete_labels_s$label[
+  match(V(collapsed_graph_s)$collapse_category, complete_labels_s$collapse_category)
+]
+
+# Style nodes based on type (individual vs aggregate)
+V(collapsed_graph_s)$node_type <- ifelse(
+  V(collapsed_graph_s)$collapse_category %in% collapse_categories_s,
+  "aggregate", "individual"
+)
+
+V(collapsed_graph_s)$fontface <- ifelse(
+  V(collapsed_graph_s)$node_type == "aggregate",
+  "italic", "plain"
+)
+
+V(collapsed_graph_s)$node_shape <- ifelse(
+  V(collapsed_graph_s)$node_type == "aggregate",
+  21, 16
+)
+
+# Add collapse metadata for reference
+collapse_map_tbl_s <- tibble(
+  node_id = node_id_s,
+  collapse_category = collapse_category_s
+)
+
+collapsed_sizes_s <- collapse_map_tbl_s %>%
+  group_by(collapse_category) %>%
+  summarise(num_diseases_collapsed = n(), .groups = "drop")
+
+original_ids_s <- collapse_map_tbl_s %>%
+  group_by(collapse_category) %>%
+  summarise(original_node_ids = paste(node_id, collapse = ", "), .groups = "drop")
+
+V(collapsed_graph_s)$num_diseases_collapsed <- collapsed_sizes_s$num_diseases_collapsed[
+  match(V(collapsed_graph_s)$collapse_category, collapsed_sizes_s$collapse_category)
+]
+
+V(collapsed_graph_s)$original_node_ids <- original_ids_s$original_node_ids[
+  match(V(collapsed_graph_s)$collapse_category, original_ids_s$collapse_category)
+]
+
+# Compute edge categories safely
+edge_pairs_s <- igraph::ends(collapsed_graph_s, E(collapsed_graph_s), names = FALSE)
+
+edge_categories_s <- apply(edge_pairs_s, 1, function(pair) {
+  cat1 <- V(collapsed_graph_s)$display_category[pair[1]]
+  cat2 <- V(collapsed_graph_s)$display_category[pair[2]]
+
+  if (is.na(cat1) || is.na(cat2)) {
+    return("Unknown")
+  }
+
+  if (cat1 == cat2) cat1 else "Cross-category"
+})
+
+E(collapsed_graph_s)$edge_category <- edge_categories_s
+
+# Create layout and tidygraph representation
+layout_matrix_s <- layout_with_fr(collapsed_graph_s)
+
+graph_tbl_s <- as_tbl_graph(collapsed_graph_s) %>%
+  activate(nodes) %>%
+  mutate(
+    frequency = V(collapsed_graph_s)$frequency,
+    display_category = V(collapsed_graph_s)$display_category,
+    label = V(collapsed_graph_s)$label,
+    fontface = V(collapsed_graph_s)$fontface,
+    node_type = V(collapsed_graph_s)$node_type,
+    node_shape = V(collapsed_graph_s)$node_shape
+  ) %>%
+  activate(edges) %>%
+  mutate(edge_category = E(collapsed_graph_s)$edge_category)
+
+graph_tbl_layout_s <- create_layout(
+  graph_tbl_s,
+  layout = "manual",
+  x = layout_matrix_s[, 1],
+  y = layout_matrix_s[, 2]
+)
+
+# Create collapsed senior network plot
+p_senior <- ggraph(graph_tbl_layout_s) +
   geom_edge_link(aes(color = edge_category), alpha = 0.5) +
   geom_node_point(
-    aes(size = frequency, color = display_category),
-    shape = 16  # Triangle
+    aes(
+      size = frequency,
+      color = display_category,
+      shape = factor(node_shape)
+    ),
+    fill = alpha("white", 0.6),
+    stroke = 1.5
+  ) +
+  geom_node_label(
+    aes(label = label, fontface = fontface),
+    na.rm = TRUE,
+    repel = TRUE,
+    label.size = 0.3,
+    max.overlaps = Inf,
+    label.r = unit(0.15, "lines"),
+    fill = alpha("white", 0.7),
+    color = "black",
+    size = 3.5
   ) +
   scale_color_manual(
     values = category_palette,
-    breaks = sorted_cats_s,
+    breaks = sort(names(category_palette)),
     name = "Node Category"
   ) +
-  geom_node_label(
-  aes(label = label),
-  na.rm = TRUE,
-  repel = TRUE,
-  label.size = 0.3,
-  max.overlaps = Inf,
-  label.r = unit(0.15, "lines"),
-  fill = alpha("white", 0.7),
-  color = "black",
-  size = 4
-)+
+  scale_shape_manual(
+    values = c(`16` = 16, `21` = 21),
+    name = "Node Type",
+    labels = c(`16` = "individual", `21` = expression(italic("aggregate")))
+  ) +
   scale_edge_color_manual(
     values = c(category_palette, "Cross-category" = "grey38"),
-    breaks = c(sorted_cats_s, "Cross-category"),
+    breaks = c(sort(names(category_palette)), "Cross-category"),
     name = "Edge Category"
   ) +
   scale_size_continuous(
     name = "Frequency",
     limits = c(freq_min, freq_max),
-    range = c(5, 12),
+    range = c(4, 9),
     breaks = c(500, 1000, 2000, 5000, 10000)
   ) +
-  theme_void() +
-  theme(
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 14)
-  )
+  theme_void()
 
-print(p_s_uncollapsed)
-
-# Save
+# Save senior collapsed network
 ggsave(
-  filename = "./network images/senior_network_graph_uncollapsed_nolabels.png",
-  plot = p_s_uncollapsed,
+  filename = "./network images/senior_network_graph_collapsed.png",
+  plot = p_senior,
   dpi = 600,
   width = 10,
   height = 8,
   units = "in"
 )
 
-cat("Number of nodes in senior network:", vcount(raw_graph_s), "\n")
+print(p_senior)
 
-
+cat("Senior collapsed network visualization completed:",
+    "\nNodes:", vcount(collapsed_graph_s),
+    "\nEdges:", ecount(collapsed_graph_s), "\n")
 ```
 
-```{r age strata heatmap}
-# Network data files - pairs of comorbid conditions from different age strata
-senior_pairs <- read.csv("./pair stats/significant_pairs_senior.csv", stringsAsFactors=FALSE) %>%
-  mutate(age_group = "senior")
-mature_adult_pairs <- read.csv("./pair stats/significant_pairs_mature_adult.csv", stringsAsFactors=FALSE) %>%
-  mutate(age_group = "mature_adult")
-young_adult_pairs <- read.csv("./pair stats/significant_pairs_young_adult.csv", stringsAsFactors=FALSE) %>%
-  mutate(age_group = "young_adult")
-puppy_pairs <- read.csv("./pair stats/significant_pairs_puppy.csv", stringsAsFactors=FALSE) %>%
-  mutate(age_group = "puppy")
-unstrat_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv", stringsAsFactors=FALSE) %>%
-  mutate(age_group = "unstratified")
-
-# Function to process dataframe and create standardized edge IDs
-# This ensures consistent comparison across networks
-process_pairs <- function(df) {
-  df %>%
-    dplyr::select(Disease1, Disease2) %>%
-    rowwise() %>%
-    mutate(
-      sorted_pair = paste(sort(c(Disease1, Disease2)), collapse = "-")
-    ) %>%
-    ungroup() %>%
-    pull(sorted_pair)
-}
-
-# Process each dataset to extract edge information
-senior_edges <- process_pairs(senior_pairs)
-mature_edges <- process_pairs(mature_adult_pairs)
-young_edges <- process_pairs(young_adult_pairs)
-puppy_edges <- process_pairs(puppy_pairs)
-unstrat_edges <- process_pairs(unstrat_pairs)
-
-# Create named list of all edge sets
-all_edge_sets <- list(
-  unstratified = unstrat_edges,
-  puppy = puppy_edges,
-  young_adult = young_edges,
-  mature_adult = mature_edges,
-  senior = senior_edges
-)
-
-# Create overlap matrix to quantify shared edges between networks
-n_sets <- length(all_edge_sets)
-overlap_matrix <- matrix(0, nrow = n_sets, ncol = n_sets)
-rownames(overlap_matrix) <- colnames(overlap_matrix) <- names(all_edge_sets)
-
-# Calculate overlaps - pairwise comparisons of edge sets
-for(i in 1:n_sets) {
-  for(j in i:n_sets) {
-    overlap <- length(intersect(all_edge_sets[[i]], all_edge_sets[[j]]))
-    overlap_matrix[i,j] <- overlap
-    overlap_matrix[j,i] <- overlap
-  }
-}
-
-# Convert the overlap matrix to long-form dataframe
-overlap_df <- as.data.frame(as.table(overlap_matrix))
-colnames(overlap_df) <- c("category", "comparison", "shared_edges")
-
-# Define order for visualization
-desired_order <- c("unstratified", "puppy", "young_adult", "mature_adult", "senior")
-
-# Convert matrix to long format for plotting
-# Filter to only plot lower triangle + diagonal (optional, for aesthetics)
-overlap_df_plot <- overlap_df %>%
-  mutate(
-    category = factor(category, levels = desired_order),
-    comparison = factor(comparison, levels = desired_order)
-  ) %>%
-  filter(as.numeric(category) <= as.numeric(comparison))
-
-
-# Set the desired order (without dummy space)
-desired_order <- c("unstratified", "puppy", "young_adult", "mature_adult", "senior")
-
-p_other_clean <- ggplot(overlap_df_plot, aes(x = category, y = comparison, fill = shared_edges)) +
-  geom_tile(color = "black", linewidth = 0.5) +
-  geom_text(aes(label = shared_edges), color = "black", size = 6) +
-  scale_fill_gradient(low = "#ffffff", high = "#00abc8") +
-  theme_minimal() +
-  labs(fill = "Shared Edges") +
+```{r network overlap heatmap}
+# Modify text size for the combined figure (optional)
+p_heatmap <- p_heatmap + 
   theme(
-    axis.text.x.top = element_text(angle = 45, hjust = 0, size = 18),
-    axis.text.y = element_text(hjust = 1, size = 18),
-    axis.title = element_blank(),
-    axis.ticks.x.top = element_blank(),
-    axis.ticks.x.bottom = element_blank(),
-    axis.ticks.y = element_blank(),
+    axis.text.x.top = element_text(angle = 45, hjust = 0, size = 20),
+    axis.text.y = element_text(hjust = 1, size = 20),
     legend.title = element_text(size = 18),
-    legend.text = element_text(size = 18),
-    panel.grid = element_blank(),
-    aspect.ratio = 1
+    legend.text = element_text(size = 18)
   ) +
-  scale_x_discrete(
-    limits = desired_order,
-    position = "top",
-    labels = c("unstratified", "puppy", "young adult", "mature adult", "senior")
-  ) +
-  scale_y_discrete(
-    limits = rev(desired_order),
-    labels = rev(c("unstratified", "puppy", "young adult", "mature adult", "senior"))
-  ) +
-  coord_fixed()
+  guides(fill = guide_colorbar(title = "Shared Edges"))
 
-p_other_clean
 ```
 
 
+```{r combined age stratified figure}
+# Create the main publication figure combining age-stratified networks with overlap heatmap
+# This shows network evolution across life stages and quantifies their relationships
 
-```{r}
-# Extract legend from p_ma_uncollapsed
+# Extract legend from mature adult plot for shared legend
 legend_ma <- get_legend(
-  p_ma_uncollapsed + 
+  p_ma + 
     theme(legend.position = "right", legend.title = element_text(size = 16), legend.text = element_text(size = 14))
 )
 
-# Suppress legends for plots that will go in the grid
+# Create clean versions without legends for the 2x2 grid
 p_ya_clean <- p_ya + theme(legend.position = "none", 
-                           plot.margin = margin(r=20, b=20))
-p_ma_clean <- p_ma_uncollapsed + theme(legend.position = "none",
-                                       plot.margin = margin(l=20, b=20))
-p_s_clean <- p_s_uncollapsed + theme(legend.position = "none",
-                                     plot.margin = margin(r=20, t=20))
-p_other_clean <- p_other_clean + theme(legend.position = "none",
-                                       plot.margin = margin(l=20, t=20))
+                           plot.margin = margin(r = 20, b = 20, t = 20))
+p_ma_clean <- p_ma + theme(legend.position = "none",
+                                     plot.margin = margin(l = 20, b = 20, r = 20, t = 20))
+p_s_clean <- p_senior + theme(legend.position = "none",
+                              plot.margin = margin(r = 20, t = 20))
+p_heatmap_clean <- p_heatmap + theme(legend.position = "none",
+                                       plot.margin = margin(l = 20, t = 20, r = 20))
 
-# Add labels to the cleaned plots
+# Add panel labels to each plot
 p_ya_labeled <- ggdraw(p_ya_clean) + 
   draw_label("a)", x = 0.02, y = 0.98, hjust = 0, vjust = 1, fontface = "bold", size = 28)
 
@@ -844,24 +1353,24 @@ p_ma_labeled <- ggdraw(p_ma_clean) +
 p_s_labeled <- ggdraw(p_s_clean) + 
   draw_label("c)", x = 0.02, y = 0.98, hjust = 0, vjust = 1, fontface = "bold", size = 28)
 
-p_other_labeled <- ggdraw(p_other_clean) + 
+p_heatmap_labeled <- ggdraw(p_heatmap_clean) + 
   draw_label("d)", x = 0.02, y = 0.98, hjust = 0, vjust = 1, fontface = "bold", size = 28)
 
 # Arrange 2x2 grid without legend
 main_grid <- plot_grid(
   plot_grid(p_ya_labeled, p_ma_labeled, ncol = 2),
-  plot_grid(p_s_labeled, p_other_labeled, ncol = 2),
+  plot_grid(p_s_labeled, p_heatmap_labeled, ncol = 2),
   ncol = 1
 )
 
-# Add the shared legend
+# Add the shared legend to create final publication figure
 final_plot <- plot_grid(
   legend_ma,
   main_grid,
   rel_widths = c(0.15, 0.85)
 )
 
-# Save
+# Save combined publication figure
 ggsave(
   filename = "./network images/combined_2x2_with_heatmap_cowplot_legend.png",
   plot = final_plot,
@@ -881,8 +1390,68 @@ ggsave(
   compression = "lzw"
 )
 
-final_plot
+print(final_plot)
+cat("Combined age-stratified publication figure created and saved\n")
 ```
+
+
+```{r visualization summary}
+# Create comprehensive summary of all visualizations produced
+visualization_summary <- data.frame(
+  Visualization = c(
+    "Main Collapsed Network",
+    "Ear Infection Subgraph", 
+    "Combined Main Figure",
+    "Young Adult Network",
+    "Mature Adult Collapsed",
+    "Senior Collapsed",
+    "Network Overlap Heatmap",
+    "Combined Age-Stratified Figure"
+  ),
+  Description = c(
+    "Main comorbidity network with collapsed categories and highlighted edges",
+    "Detailed subgraph showing ear infection and all its connections",
+    "Two-panel figure combining main network with ear infection detail",
+    "Young adult life stage network with all nodes labeled",
+    "Mature adult network with skin and infection/parasites collapsed",
+    "Senior network with skin and infection/parasites collapsed", 
+    "Heatmap showing edge overlap quantification between age groups",
+    "2x2 grid combining all age networks with overlap analysis"
+  ),
+  Output_Files = c(
+    "undirected_network_graph.png",
+    "Part of final_network_layout",
+    "final_network_layout.png/tiff",
+    "young_adult_network_graph.png",
+    "mature_adult_network_graph_collapsed.png",
+    "senior_network_graph_collapsed.png",
+    "Part of combined figure",
+    "combined_2x2_with_heatmap_cowplot_legend.png/tiff"
+  ),
+  Key_Features = c(
+    "Node collapsing, edge highlighting, aggregate vs individual styling",
+    "Focused view of disease connections, consistent with main network colors",
+    "Publication-ready two-panel layout with shared legend",
+    "All nodes labeled, consistent frequency scaling across age groups",
+    "Strategic collapsing of high-frequency categories, italic aggregate labels",
+    "Strategic collapsing of high-frequency categories, italic aggregate labels",
+    "Quantitative overlap matrix, upper-triangle visualization",
+    "Comprehensive age comparison with quantitative overlap analysis"
+  )
+)
+
+# Save visualization summary
+write.csv(visualization_summary, "./network images/undirected_visualization_summary.csv", row.names = FALSE)
+
+cat("\n=== UNDIRECTED NETWORK VISUALIZATION COMPLETE ===")
+cat("\nAll network visualizations created successfully.")
+cat("\nOutput saved to ./network images/ directory.")
+cat("\nVisualizations created:", nrow(visualization_summary), "different configurations.")
+cat("\nKey outputs: Main collapsed network, ear infection subgraph, age-stratified comparisons\n")
+```
+
+
+
 
 
 
