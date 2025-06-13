@@ -15,36 +15,46 @@ library(tidyverse)    # Data manipulation
 library(tidygraph)    # Tidy graph data structures
 library(patchwork)    # Additional plot composition
 
-# Create necessary output directories
-dir.create("./network images", showWarnings = FALSE, recursive = TRUE)
+# Consolidated directory structure
+required_dirs <- c(
+  "./data/clean",
+  "./data/frequencies",
+  "./results/models",
+  "./results/networks",
+  "./results/statistics",
+  "./outputs/figures",
+  "./outputs/tables"
+)
+
+# Create all directories at once
+for(dir in required_dirs) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+}
 ```
 
 ```{r load precomputed data}
 # Load pre-computed analysis results from previous scripts
 # Main network data
-significant_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv")
+significant_pairs <- read.csv("./results/networks/significant_pairs_unstrat.csv")
 disease_code <- read.csv("./diseaseCodes.csv")
-disease_frequencies <- read.csv("./frequency tables/disease_frequencies_unstrat.csv")
+disease_frequencies <- read.csv("./data/frequencies/disease_frequencies_unstrat.csv")
 
 # Age-stratified network data
-significant_pairs_ya <- read.csv("./pair stats/significant_pairs_young_adult.csv")
-disease_frequencies_ya <- read.csv("./frequency tables/disease_frequencies_young_adult.csv")
+significant_pairs_ya <- read.csv("./results/networks/significant_pairs_young_adult.csv")
+disease_frequencies_ya <- read.csv("./data/frequencies/disease_frequencies_young_adult.csv")
 
-significant_pairs_ma <- read.csv("./pair stats/significant_pairs_mature_adult.csv")
-disease_frequencies_ma <- read.csv("./frequency tables/disease_frequencies_mature_adult.csv")
+significant_pairs_ma <- read.csv("./results/networks/significant_pairs_mature_adult.csv")
+disease_frequencies_ma <- read.csv("./data/frequencies/disease_frequencies_mature_adult.csv")
 
-significant_pairs_s <- read.csv("./pair stats/significant_pairs_senior.csv")
-disease_frequencies_s <- read.csv("./frequency tables/disease_frequencies_senior.csv")
+significant_pairs_s <- read.csv("./results/networks/significant_pairs_senior.csv")
+disease_frequencies_s <- read.csv("./data/frequencies/disease_frequencies_senior.csv")
 
 # Load directed network significant pairs (12-month window)
-significant_pairs_directed <- read.csv("./pair stats/significant_pairs_directed_12m.csv") %>%
+significant_pairs_directed <- read.csv("./results/networks/significant_pairs_directed_12m.csv") %>%
   rename(from = source, to = target)
 
-# Extract edges for directed network
-edges_directed <- significant_pairs_directed %>% dplyr::select(from, to)
-
 # Load previously created figure
-p_heatmap <- readRDS("./network tables/network_overlap_heatmap.rds")
+p_heatmap <- readRDS("./results/networks/network_overlap_heatmap.rds")
 ```
 
 ```{r visualization constants}
@@ -502,7 +512,7 @@ p <- ggraph(layout_tbl) +
 
 # Save main network plot
 ggsave(
-  filename = "./network images/undirected_network_graph.png",
+  filename = "./outputs/figures/undirected_network_graph.png",
   plot = p,
   dpi = 600,
   width = 10,
@@ -512,6 +522,7 @@ ggsave(
 
 print(p)
 ```
+
 ```{r ear infection subgraph}
 # Create detailed subgraph showing ear infection connections
 # This provides a focused view of one important disease and its neighbors
@@ -621,7 +632,7 @@ p_sub <- ggraph(layout_sub) +
 
 # Save main network plot
 ggsave(
-  filename = "./network images/ear_infection_subgraph.png",
+  filename = "./outputs/figures/ear_infection_subgraph.png",
   plot = p_sub,
   dpi = 600,
   width = 10,
@@ -684,7 +695,7 @@ print(final_layout)
 
 # Save combined main figure
 ggsave(
-  filename = "./network images/final_network_layout.png",
+  filename = "./outputs/figures/final_network_layout.png",
   plot = final_layout,
   dpi = 600,
   width = 12,
@@ -693,7 +704,7 @@ ggsave(
 )
 
 ggsave(
-  filename = "./network images/final_network_layout.tiff",
+  filename = "./outputs/figures/final_network_layout.tiff",
   plot = final_layout,
   dpi = 600,
   width = 12,
@@ -845,7 +856,7 @@ p_ya <- ggraph(graph_tbl_ya_layout) +
 
 # Save young adult network plot
 ggsave(
-  filename = "./network images/young_adult_network_graph.png",
+  filename = "./outputs/figures/young_adult_network_graph.png",
   plot = p_ya,
   dpi = 600,
   width = 10,
@@ -1073,7 +1084,7 @@ p_ma <- ggraph(graph_tbl_ma_layout_collapsed) +
 
 # Save mature adult collapsed network
 ggsave(
-  filename = "./network images/mature_adult_network_graph_collapsed.png",
+  filename = "./outputs/figures/mature_adult_network_graph_collapsed.png",
   plot = p_ma,
   dpi = 600,
   width = 10,
@@ -1301,7 +1312,7 @@ p_senior <- ggraph(graph_tbl_layout_s) +
 
 # Save senior collapsed network
 ggsave(
-  filename = "./network images/senior_network_graph_collapsed.png",
+  filename = "./outputs/figures/senior_network_graph_collapsed.png",
   plot = p_senior,
   dpi = 600,
   width = 10,
@@ -1379,7 +1390,7 @@ final_plot <- plot_grid(
 
 # Save combined publication figure
 ggsave(
-  filename = "./network images/combined_2x2_with_heatmap_cowplot_legend.png",
+  filename = "./outputs/figures/combined_2x2_with_heatmap_cowplot_legend.png",
   plot = final_plot,
   dpi = 600,
   width = 20,
@@ -1388,7 +1399,7 @@ ggsave(
 )
 
 ggsave(
-  filename = "./network images/combined_2x2_with_heatmap_cowplot_legend.tiff",
+  filename = "./outputs/figures/combined_2x2_with_heatmap_cowplot_legend.tiff",
   plot = final_plot,
   dpi = 600,
   width = 20,
@@ -1405,7 +1416,7 @@ cat("Combined age-stratified publication figure created and saved\n")
 # This shows temporal relationships with collapsed categories and directed edges
 
 # Build directed graph from significant pairs
-g_directed <- graph_from_data_frame(edges_directed, directed = TRUE)
+g_directed <- graph_from_data_frame(significant_pairs_directed, directed = TRUE)
 g_directed <- delete_vertices(g_directed, degree(g_directed) == 0)
 
 # Add node attributes using disease frequency data
@@ -1579,7 +1590,7 @@ p_directed <- ggraph(layout_directed) +
   theme_void()
 
 ggsave(
-  filename = "./network images/directed_12m.png",
+  filename = "./outputs/figures/directed_12m.png",
   plot = p_directed,
   dpi = 600,
   width = 10,
@@ -1663,8 +1674,8 @@ labeled_stacked_directed <- cowplot::ggdraw(stacked_directed) +
 combined_directed_plot <- cowplot::plot_grid(labeled_stacked_directed, shared_legend_directed, ncol = 2, rel_widths = c(4, 1))
 
 # Save combined directed figure
-ggsave("./network images/combined_directed.tiff", combined_directed_plot, dpi = 600, width = 12, height = 14, units = "in", compression = "lzw")
-ggsave("./network images/combined_directed.png", combined_directed_plot, dpi = 600, width = 12, height = 14, units = "in")
+ggsave("./outputs/figures/combined_directed.tiff", combined_directed_plot, dpi = 600, width = 12, height = 14, units = "in", compression = "lzw")
+ggsave("./outputs/figures/combined_directed.png", combined_directed_plot, dpi = 600, width = 12, height = 14, units = "in")
 
 print(combined_directed_plot)
 
@@ -1705,7 +1716,7 @@ visualization_summary <- data.frame(
   )
 )
 
-write.csv(visualization_summary, "./network images/comprehensive_visualization_summary.csv", row.names = FALSE)
+write.csv(visualization_summary, "./results/statistics/comprehensive_visualization_summary.csv", row.names = FALSE)
 
 cat("\n=== COMPREHENSIVE NETWORK VISUALIZATION COMPLETE ===")
 cat("\nBoth undirected and directed network visualizations created successfully.")

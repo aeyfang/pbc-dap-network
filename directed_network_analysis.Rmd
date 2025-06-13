@@ -86,6 +86,27 @@ disease_mapping <- disease_frequencies %>%
     Disease.Category
   )
 
+# Helper function to clean disease names (same as in undirected analysis)
+clean_disease_name <- function(name) {
+  if(startsWith(name, "condition_")) {
+    return(sub("^condition_", "", name))
+  } else if(startsWith(name, "hs_cancer_types_")) {
+    code <- disease_frequencies %>%
+      filter(Code.from.DAP.data == name) %>%
+      pull(Numerical.Codes)
+    return(if(length(code) == 0) name else as.character(code))
+  }
+  return(name)
+}
+
+# Format the pairs to get numerical codes
+undirected_comorbid_pairs <- undirected_comorbid_pairs %>%
+  transmute(
+    Disease1 = map_chr(Disease1, clean_disease_name),
+    Disease2 = map_chr(Disease2, clean_disease_name)
+  )
+
+
 # Clean and process health_condition data
 # Filter to dogs that are in cleaned_data and format condition codes
 health_condition_clean <- health_condition %>%
@@ -368,18 +389,19 @@ analyze_disease_pair <- function(disease1, disease2,
     dplyr::filter(dog_id %in% dogs_with_both,
            numerical_code == disease1) %>%
     dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
-    dplyr::mutate(year1 = hs_diagnosis_year, month1 = hs_diagnosis_month)
+    dplyr::mutate(year1 = as.numeric(hs_diagnosis_year), month1 = as.numeric(hs_diagnosis_month))
   
   temporal_data2 <- all_conditions %>%
     dplyr::filter(dog_id %in% dogs_with_both,
            numerical_code == disease2) %>%
     dplyr::select(dog_id, hs_diagnosis_year, hs_diagnosis_month) %>%
-    dplyr::mutate(year2 = hs_diagnosis_year, month2 = hs_diagnosis_month)
+    dplyr::mutate(year2 = as.numeric(hs_diagnosis_year), month2 = as.numeric(hs_diagnosis_month))
   
-  # Join temporal data and calculate timing relationships
+  # Join temporal data and calculate timing relationships 
   temporal_data <- inner_join(temporal_data1, temporal_data2, by = "dog_id") %>%
     dplyr::mutate(
       months_between = abs((year2 - year1) * 12 + (month2 - month1)),
+      # calculate probability based on window size
       window_prob = case_when(
         months_between <= window_size ~ 1,
         TRUE ~ (window_size / months_between) * (2 - window_size / months_between)
@@ -407,7 +429,7 @@ analyze_disease_pair <- function(disease1, disease2,
     dplyr::pull(Disease.Name) %>%
     { if (length(.) > 0) . else "Unknown" }
 
-  # Calculate final result statistics
+  # Calculate final result statistics 
   results <- data.frame(
     disease1 = disease1,
     disease2 = disease2,
@@ -416,6 +438,7 @@ analyze_disease_pair <- function(disease1, disease2,
     n_dogs_with_both = n_dogs_with_both,
     expected_disease1_before_disease2 = sum(prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob),
     expected_disease2_before_disease1 = sum(prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob),
+    # YOUR ORIGINAL WEIGHTED VARIANCES
     variance_disease1_before_disease2 = sum(
       (prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob) * 
       (1 - prob_data[[col1]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob)
@@ -425,7 +448,8 @@ analyze_disease_pair <- function(disease1, disease2,
       (1 - prob_data[[col2]] / (prob_data[[col1]] + prob_data[[col2]]) * temporal_data$window_prob)
     ),
     count_disease1_first = sum((temporal_data$first_disease == disease1) * temporal_data$window_prob),
-    count_disease2_first = sum((temporal_data$first_disease == disease2) * temporal_data$window_prob)
+    count_disease2_first = sum((temporal_data$first_disease == disease2) * temporal_data$window_prob),
+    stringsAsFactors = FALSE
   )
   
   return(results)
@@ -434,23 +458,26 @@ analyze_disease_pair <- function(disease1, disease2,
 
 ```{r temporal analysis}
 # Iterate across all comorbidity pairs to analyze temporal relationships
-direct_expected_counts <- suppressWarnings({
-  future_map_dfr(1:nrow(undirected_comorbid_pairs), ~{
-    disease_pair <- undirected_comorbid_pairs[.x, ]
-    
-    result <- analyze_disease_pair(
-      disease1 = disease_pair$Disease1,
-      disease2 = disease_pair$Disease2,
-      cleaned_data = cleaned_data,
-      all_conditions = all_conditions,
-      personalized_probability = personalized_probability,
-      disease_mapping = disease_mapping, 
-      window_size = window_size
-    )
-    
-    result  # If NULL, will be skipped
-  }, .options = furrr_options(seed = TRUE))
-})
+direct_expected_counts <- map_dfr(1:nrow(undirected_comorbid_pairs), function(i) {
+  disease_pair <- undirected_comorbid_pairs[i, ]
+  
+  result <- analyze_disease_pair(
+    disease1 = disease_pair$Disease1,
+    disease2 = disease_pair$Disease2,
+    cleaned_data = cleaned_data,
+    all_conditions = all_conditions,
+    personalized_probability = personalized_probability,
+    disease_mapping = disease_mapping, 
+    window_size = window_size
+  )
+  
+  if(!is.null(result)) {
+    return(result)
+  } else {
+    return(NULL)
+  }
+}, .progress = TRUE) %>%
+  filter(!is.na(disease1))  # Remove any NULL results
 
 # Save temporal analysis results
 write.csv(
@@ -486,19 +513,6 @@ results <- direct_expected_counts %>%
     adj_p_value_2to1 = p.adjust(p_value_2to1, method = "bonferroni"),
     significant_1to2 = adj_p_value_1to2 < 0.01,
     significant_2to1 = adj_p_value_2to1 < 0.01
-  )%>%
-  mutate(
-    se_1to2 = sqrt(variance_disease1_before_disease2),
-    ci_lower_1to2 = expected_disease1_before_disease2 - 1.96 * se_1to2,
-    ci_upper_1to2 = expected_disease1_before_disease2 + 1.96 * se_1to2,
-    
-    se_2to1 = sqrt(variance_disease2_before_disease1),
-    ci_lower_2to1 = expected_disease2_before_disease1 - 1.96 * se_2to1,
-    ci_upper_2to1 = expected_disease2_before_disease1 + 1.96 * se_2to1,
-    
-    # Flags to indicate whether actual count is outside CI
-    outside_ci_1to2 = (count_disease1_first < ci_lower_1to2 | count_disease1_first > ci_upper_1to2),
-    outside_ci_2to1 = (count_disease2_first < ci_lower_2to1 | count_disease2_first > ci_upper_2to1)
   )
 
 # Create output tables with both raw and adjusted p-values
@@ -521,12 +535,6 @@ direct_significant_pairs <- results %>%
            adjusted_p_value = adj_p_value_2to1)
   )} %>%
   arrange(adjusted_p_value)  # Sort by adjusted p-value
-
-# Save formatted network attributes 
-write.csv(
-  direct_significant_pairs, 
-  sprintf("./network tables/formatted_pairs_directed_%dm.csv", window_size)
-)
 ```
 
 ```{r network attribute tables}
@@ -552,12 +560,6 @@ crosswalk_table <- direct_significant_pairs %>%
 crosswalk_table <- crosswalk_table %>%
   dplyr::select(source, source_name, target, target_name, p_value)
 
-write.csv(
-  crosswalk_table, 
-  sprintf("./reference tables/crosswalk_direct_%dm.csv", window_size), 
-  row.names = FALSE
-)
-
 # Create comprehensive results with one row per direction
 comprehensive_results <- results %>%
   {bind_rows(
@@ -569,9 +571,6 @@ comprehensive_results <- results %>%
       expected_count = expected_disease1_before_disease2,
       actual_count = count_disease1_first,
       variance = variance_disease1_before_disease2,
-      ci_lower = ci_lower_1to2,
-      ci_upper = ci_upper_1to2,
-      outside_ci = outside_ci_1to2
     ) %>%
       dplyr::mutate(
         source = as.character(disease1),  # Convert to character
@@ -587,9 +586,6 @@ comprehensive_results <- results %>%
       expected_count = expected_disease2_before_disease1,
       actual_count = count_disease2_first,
       variance = variance_disease2_before_disease1,
-      ci_lower = ci_lower_2to1,
-      ci_upper = ci_upper_2to1,
-      outside_ci = outside_ci_2to1
     ) %>%
       dplyr::mutate(
         source = as.character(disease2),  # Convert to character
@@ -611,16 +607,13 @@ comprehensive_results <- results %>%
     expected_count,
     actual_count,
     variance,
-    ci_lower,
-    ci_upper,
-    outside_ci
   ) %>%
   dplyr::arrange(raw_p_value)
 
 # Save comprehensive results
 write.csv(
   comprehensive_results, 
-  sprintf("./pair stats/comprehensive_pairs_directed_%dm.csv", window_size), 
+  sprintf("./results/networks/comprehensive_pairs_directed_%dm.csv", window_size), 
   row.names = FALSE
 )
 
@@ -630,7 +623,7 @@ significant_comprehensive <- comprehensive_results %>%
 
 write.csv(
   significant_comprehensive,
-  sprintf("./pair stats/significant_pairs_directed_%dm.csv", window_size),
+  sprintf("./results/networks/significant_pairs_directed_%dm.csv", window_size),
   row.names = FALSE
 )
 ```

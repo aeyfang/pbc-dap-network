@@ -17,35 +17,46 @@ library(caret)        # Statistical modeling functions
 library(moments)      # For skewness calculation
 library(ggforce)      # For facet_col function in coefficient visualization
 
-# Create necessary directories if they don't exist
-dir.create("./figures", showWarnings = FALSE)
-dir.create("./additional stats", showWarnings = FALSE)
-dir.create("./network tables", showWarnings = FALSE)
+# Consolidated directory structure
+required_dirs <- c(
+  "./data/clean",
+  "./data/frequencies",
+  "./results/models",
+  "./results/networks",
+  "./results/statistics",
+  "./outputs/figures",
+  "./outputs/tables"
+)
+
+# Create all directories at once
+for(dir in required_dirs) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+}
 ```
 
 
 ```{r data loading}
 # Load previously processed data files for analysis
 # Demographic data files
-cleaned_without_healthy_dogs <- read.csv(file = "./clean data/cleaned_unstrat.csv")
-cleaned_with_healthy_dogs <- read.csv(file="./clean data/merged_data_with_healthy_dogs.csv")
-disease_frequencies <- read.csv(file = "./frequency tables/disease_frequencies_unstrat.csv")
+cleaned_without_healthy_dogs <- read.csv(file = "./data/clean/cleaned_unstrat.csv")
+cleaned_with_healthy_dogs <- read.csv(file="./data/clean/merged_data_with_healthy_dogs.csv")
+disease_frequencies <- read.csv(file = "./data/frequencies/disease_frequencies_unstrat.csv")
 
 # Load coefficient data from undirected network analysis
-model_coef <- read.csv(file = "./model coefficients/coef_and_pvalues_unstrat.csv")
+model_coef <- read.csv(file = "./results/models/coef_and_pvalues_unstrat.csv")
 
 # Network data files - pairs of comorbid conditions from different age strata
-senior_pairs <- read.csv("./pair stats/significant_pairs_senior.csv", stringsAsFactors=FALSE) %>%
+senior_pairs <- read.csv("./results/networks/significant_pairs_senior.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "senior")
-mature_adult_pairs <- read.csv("./pair stats/significant_pairs_mature_adult.csv", stringsAsFactors=FALSE) %>%
+mature_adult_pairs <- read.csv("./results/networks/significant_pairs_mature_adult.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "mature_adult")
-young_adult_pairs <- read.csv("./pair stats/significant_pairs_young_adult.csv", stringsAsFactors=FALSE) %>%
+young_adult_pairs <- read.csv("./results/networks/significant_pairs_young_adult.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "young_adult")
-puppy_pairs <- read.csv("./pair stats/significant_pairs_puppy.csv", stringsAsFactors=FALSE) %>%
+puppy_pairs <- read.csv("./results/networks/significant_pairs_puppy.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "puppy")
-unstrat_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv", stringsAsFactors=FALSE) %>%
+unstrat_pairs <- read.csv("./results/networks/significant_pairs_unstrat.csv", stringsAsFactors=FALSE) %>%
   mutate(age_group = "unstratified")
-frequency<-read.csv("./frequency tables/disease_frequencies_unstrat.csv")
+frequency <- read.csv("./data/frequencies/disease_frequencies_unstrat.csv")
 ```
 
 ```{r coefficient visualization preprocessing}
@@ -80,14 +91,14 @@ format_coef_value <- function(x) {
 
 # Round coefficients to 2 decimal places or format in scientific notation
 sig_diseases <- format_coef %>%
-  mutate(across(
+  dplyr::mutate(across(
     c(Age, Weight, Breed, femaleSpayed, maleUnneutered, maleNeutered),
     format_coef_value
   ))
 
 # Add significance indicators to create a display version
 sig_diseases <- sig_diseases %>%
-  mutate(
+  dplyr::mutate(
     Age_display = case_when(
       pAge < 0.001 ~ paste0(Age, "***"),
       pAge < 0.01 ~ paste0(Age, "**"),
@@ -128,7 +139,7 @@ sig_diseases <- sig_diseases %>%
 
 # Add columns for color coding
 sig_diseases <- sig_diseases %>%
-  mutate(
+  dplyr::mutate(
     Age_color = case_when(
       as.numeric(Age) > 0 & pAge < 0.05 ~ "pos_sig",
       as.numeric(Age) > 0 & pAge >= 0.05 ~ "pos_nonsig",
@@ -183,8 +194,8 @@ save_sig <- sig_diseases %>%
   )
 
 # Save formatted coefficient data
-write_xlsx(save_sig, "./additional stats/coef_visualization.xlsx")
-write.csv(save_sig, "./additional stats/coef_visualization.csv", row.names = FALSE)
+write_xlsx(save_sig, "./results/statistics/coef_visualization.xlsx")
+write.csv(save_sig, "./results/statistics/coef_visualization.csv", row.names = FALSE)
 ```
 
 ```{r coefficient heatmap visualization}
@@ -287,14 +298,14 @@ print(coef_plot)
 
 # Save the coefficient heatmap
 ggsave(
-  filename = "./figures/full_coef_table.tiff", 
+  filename = "./outputs/figures/full_coef_table.tiff", 
   plot = coef_plot, 
   width = 10, height = 22, units = "in", 
   dpi = 600, compression = "lzw"
 )
 
 ggsave(
-  filename = "./figures/full_coef_table.png", 
+  filename = "./outputs/figures/full_coef_table.png", 
   plot = coef_plot, 
   width = 10, height = 22, units = "in", 
   dpi = 600
@@ -327,7 +338,7 @@ get_numerical_code <- function(disease_code) {
 # Function to process pairs and create standardized edge identifiers
 process_pairs <- function(df) {
   df %>%
-    mutate(
+    dplyr::mutate(
       code1 = sapply(Disease1, get_numerical_code),
       code2 = sapply(Disease2, get_numerical_code),
       code_left = pmin(code1, code2, na.rm = TRUE),
@@ -383,7 +394,7 @@ for(i in 1:n_sets) {
 
 # Convert matrix to long format for analysis and save
 overlap_df <- as.data.frame(overlap_matrix) %>%
-  mutate(category = rownames(overlap_matrix)) %>%
+  dplyr::mutate(category = rownames(overlap_matrix)) %>%
   pivot_longer(
     cols = -category,
     names_to = "comparison",
@@ -395,7 +406,7 @@ desired_order <- c("unstratified", "puppy", "young_adult", "mature_adult", "seni
 
 # Create heatmap visualization of edge overlap
 overlap_heatmap <- overlap_df %>%
-  mutate(
+  dplyr::mutate(
     category = factor(category, levels = desired_order),
     comparison = factor(comparison, levels = desired_order)
   ) %>%
@@ -433,18 +444,18 @@ overlap_heatmap <- overlap_df %>%
 print(overlap_heatmap)
 
 # Save network overlap heatmap
-ggsave("./figures/network_overlap_heatmap.tiff", overlap_heatmap, 
+ggsave("./outputs/figures/network_overlap_heatmap.tiff", overlap_heatmap, 
        width = 8, height = 6, dpi = 600, compression = "lzw")
 
-ggsave("./figures/network_overlap_heatmap.png", overlap_heatmap, 
+ggsave("./outputs/figures/network_overlap_heatmap.png", overlap_heatmap, 
        width = 8, height = 6, dpi = 600)
 
 # Save overlap matrix for visualization
-write.csv(overlap_matrix, "./network tables/network_overlap_matrix.csv", row.names = TRUE)
-write.csv(overlap_df, "./network tables/network_overlap_long.csv", row.names = FALSE)
+write.csv(overlap_matrix, "./results/networks/network_overlap_matrix.csv", row.names = TRUE)
+write.csv(overlap_df, "./results/networks/network_overlap_long.csv", row.names = FALSE)
 
 # Save the ggplot object for reuse in visualization script
-saveRDS(overlap_heatmap, "./network tables/network_overlap_heatmap.rds")
+saveRDS(overlap_heatmap, "./results/networks/network_overlap_heatmap.rds")
 ```
 
 ```{r shared comorbidities across age groups}
@@ -506,8 +517,8 @@ age_specific_summary <- data.frame(
 )
 
 # Save results
-write.csv(shared_edges_summary, "./additional stats/shared_edges_summary.csv", row.names = FALSE)
-write.csv(age_specific_summary, "./additional stats/age_specific_summary.csv", row.names = FALSE)
+write.csv(shared_edges_summary, "./results/statistics/shared_edges_summary.csv", row.names = FALSE)
+write.csv(age_specific_summary, "./results/statistics/age_specific_summary.csv", row.names = FALSE)
 
 # Print key findings
 cat("Shared comorbidities analysis:",
@@ -538,7 +549,7 @@ young_unique_nodes <- extract_nodes(young_specific_edges)
 # Create detailed edge tables with disease names and categories
 lookup_table <- disease_frequencies %>%
   dplyr::select(Code.from.DAP.data, Disease.Name, Disease.Category) %>%
-  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
+  dplyr::mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
 
 # Lookup functions for disease information
 lookup_disease_name <- function(code_number) {
@@ -568,7 +579,7 @@ build_edge_table <- function(edge_vector, age_group_name) {
   
   tibble(edge = edge_vector) %>%
     separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
-    mutate(
+    dplyr::mutate(
       age_group = age_group_name,
       disease_1 = sapply(code1, lookup_disease_name),
       category_1 = sapply(code1, lookup_disease_category),
@@ -592,10 +603,10 @@ young_edge_table <- build_edge_table(young_specific_edges, "Young Adult")
 all_age_specific_edges <- bind_rows(senior_edge_table, mature_edge_table, young_edge_table)
 
 # Save detailed edge tables
-write.csv(senior_edge_table, "./additional stats/senior_specific_edges_with_categories.csv", row.names = FALSE)
-write.csv(mature_edge_table, "./additional stats/mature_specific_edges_with_categories.csv", row.names = FALSE)
-write.csv(young_edge_table, "./additional stats/young_specific_edges_with_categories.csv", row.names = FALSE)
-write.csv(all_age_specific_edges, "./additional stats/all_age_specific_edges.csv", row.names = FALSE)
+write.csv(senior_edge_table, "./results/statistics/senior_specific_edges_with_categories.csv", row.names = FALSE)
+write.csv(mature_edge_table, "./results/statistics/mature_specific_edges_with_categories.csv", row.names = FALSE)
+write.csv(young_edge_table, "./results/statistics/young_specific_edges_with_categories.csv", row.names = FALSE)
+write.csv(all_age_specific_edges, "./results/statistics/all_age_specific_edges.csv", row.names = FALSE)
 
 # Print summary
 cat("Age-specific edge analysis:",
@@ -621,7 +632,7 @@ percent_unique_unstrat <- round((n_unique_unstrat / length(unstrat_edges)) * 100
 unstrat_edge_table <- build_edge_table(unique_unstrat_edges, "Unstratified Only")
 
 # Save unstratified-specific analysis
-write.csv(unstrat_edge_table, "./additional stats/unstratified_specific_edges.csv", row.names = FALSE)
+write.csv(unstrat_edge_table, "./results/statistics/unstratified_specific_edges.csv", row.names = FALSE)
 
 # Create comprehensive summary of all unique edge patterns
 edge_pattern_summary <- data.frame(
@@ -639,7 +650,7 @@ edge_pattern_summary <- data.frame(
   )
 )
 
-write.csv(edge_pattern_summary, "./additional stats/edge_pattern_summary.csv", row.names = FALSE)
+write.csv(edge_pattern_summary, "./results/statistics/edge_pattern_summary.csv", row.names = FALSE)
 
 cat("Unstratified network analysis:",
     "\nTotal edges in unstratified network:", length(unstrat_edges),
@@ -669,7 +680,7 @@ node_degree_table <- data.frame(
   degree = node_degrees,
   stringsAsFactors = FALSE
 ) %>%
-  mutate(
+  dplyr::mutate(
     # Clean disease codes for matching
     clean_code = sub("^condition_", "", disease_code),
     # Add disease names and categories
@@ -693,7 +704,7 @@ node_degree_table <- data.frame(
   arrange(desc(degree))
 
 # Save node degree analysis
-write.csv(node_degree_table, "./additional stats/node_degrees_unstratified.csv", row.names = FALSE)
+write.csv(node_degree_table, "./results/statistics/node_degrees_unstratified.csv", row.names = FALSE)
 
 cat("Node degree calculation:",
     "\nTotal nodes in unstratified network:", length(node_data),
@@ -719,7 +730,7 @@ exp_vs_power <- compare_distributions(exp_fit, power_fit)
 
 # Create degree frequency table for visualization
 degree_freq <- as.data.frame(table(node_data)) %>%
-  mutate(
+  dplyr::mutate(
     degrees = as.numeric(as.character(node_data)),
     Frequency = Freq / sum(Freq),
     Cumulative_Freq = cumsum(Frequency)
@@ -800,13 +811,13 @@ distribution_results <- data.frame(
   ),
   P_Value_vs_Other = c(power_vs_exp$p_two_sided, exp_vs_power$p_one_sided)
 ) %>%
-  mutate(
+  dplyr::mutate(
     AIC = -2 * LogLikelihood + 2 * c(1, 1)  # Both distributions have 1 parameter
   )
 
 # Save degree distribution analysis
-write.csv(degree_freq, "./additional stats/degree_frequency_table.csv", row.names = FALSE)
-write.csv(distribution_results, "./additional stats/distribution_comparison.csv", row.names = FALSE)
+write.csv(degree_freq, "./results/statistics/degree_frequency_table.csv", row.names = FALSE)
+write.csv(distribution_results, "./results/statistics/distribution_comparison.csv", row.names = FALSE)
 
 # Create summary statistics for degree distribution
 degree_stats <- data.frame(
@@ -821,7 +832,7 @@ degree_stats <- data.frame(
   )
 )
 
-write.csv(degree_stats, "./additional stats/degree_distribution_stats.csv", row.names = FALSE)
+write.csv(degree_stats, "./results/statistics/degree_distribution_stats.csv", row.names = FALSE)
 
 # Print statistical results
 cat("Degree Distribution Analysis:",
@@ -915,7 +926,7 @@ network_metrics_list <- list(
 all_network_metrics <- bind_rows(network_metrics_list)
 
 # Save comprehensive network topology results
-write.csv(all_network_metrics, "./additional stats/network_topology_metrics.csv", row.names = FALSE)
+write.csv(all_network_metrics, "./results/statistics/network_topology_metrics.csv", row.names = FALSE)
 
 # Create summary comparison table (full networks only)
 topology_summary <- all_network_metrics %>%
@@ -936,7 +947,7 @@ cat("Metrics calculated: density, clustering, centralization, path length, diame
 
 # Prepare dataset for breed analysis
 diseases_data <- cleaned_with_healthy_dogs %>%
-  mutate(
+  dplyr::mutate(
     # Create factors and derived variables
     purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
     age = as.numeric(dd_age_years),
@@ -949,7 +960,7 @@ diseases_data <- cleaned_with_healthy_dogs %>%
 # Create reference table for disease code lookup
 reference_table <- disease_frequencies %>%
   dplyr::select(Code.from.DAP.data, Disease.Name) %>%
-  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
+  dplyr::mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
 
 # Define all disease columns for analysis
 all_disease_columns <- c(
@@ -1009,7 +1020,7 @@ breed_results$P_Adjusted <- p.adjust(breed_results$P_Value, method = "BH")
 
 # Format disease names using reference table
 breed_results_formatted <- breed_results %>%
-  mutate(
+  dplyr::mutate(
     Disease_Name = sapply(Disease, function(d) {
       if(grepl("condition_", d)) {
         code <- sub("condition_", "", d)
@@ -1031,14 +1042,14 @@ breed_results_formatted <- breed_results %>%
   arrange(P_Adjusted)
 
 # Save comprehensive breed analysis results
-write.csv(breed_results_formatted, "./additional stats/breed_disease_associations_full.csv", row.names = FALSE)
+write.csv(breed_results_formatted, "./results/statistics/breed_disease_associations_full.csv", row.names = FALSE)
 
 # Create summary statistics by risk category
 breed_risk_summary <- breed_results_formatted %>%
   count(Risk_Category) %>%
-  mutate(Percentage = round(n / sum(n) * 100, 1))
+  dplyr::mutate(Percentage = round(n / sum(n) * 100, 1))
 
-write.csv(breed_risk_summary, "./additional stats/breed_risk_summary.csv", row.names = FALSE)
+write.csv(breed_risk_summary, "./results/statistics/breed_risk_summary.csv", row.names = FALSE)
 
 # Identify top diseases with strongest breed associations
 top_purebred_risk <- breed_results_formatted %>%
@@ -1054,8 +1065,8 @@ top_mixed_risk <- breed_results_formatted %>%
   dplyr::select(Disease_Name, OddsRatio, CI_Lower, CI_Upper, P_Adjusted)
 
 # Save top associations
-write.csv(top_purebred_risk, "./additional stats/top_purebred_risk_diseases.csv", row.names = FALSE)
-write.csv(top_mixed_risk, "./additional stats/top_mixed_risk_diseases.csv", row.names = FALSE)
+write.csv(top_purebred_risk, "./results/statistics/top_purebred_risk_diseases.csv", row.names = FALSE)
+write.csv(top_mixed_risk, "./results/statistics/top_mixed_risk_diseases.csv", row.names = FALSE)
 
 # Print summary results
 cat("Breed-disease association analysis:",
@@ -1101,11 +1112,11 @@ analysis_summary <- data.frame(
   )
 )
 
-write.csv(analysis_summary, "./additional stats/analysis_summary.csv", row.names = FALSE)
+write.csv(analysis_summary, "./results/statistics/analysis_summary.csv", row.names = FALSE)
 
 cat("\n=== ANALYSIS COMPLETE ===")
 cat("\nAll analytical computations finished successfully.")
-cat("\nResults saved to ./additional stats/ and ./network tables/ directories.")
+cat("\nResults saved to ./results/statistics/ and ./network tables/ directories.")
 cat("\nSummary of analyses:", nrow(analysis_summary), "major analytical components completed.\n")
 ```
 
