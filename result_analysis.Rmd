@@ -6,16 +6,19 @@ output: html_document
 ---
 
 ```{r setup}
-# Load required packages for network analysis and visualization
-library(tidyverse)  # Data manipulation and visualization
-library(readxl)     # Read Excel files
-library(poweRlaw)   # Power law distribution fitting
+# Load required packages for network analysis and statistical computations
+library(tidyverse)    # Data manipulation and analysis
+library(readxl)       # Read Excel files
+library(poweRlaw)     # Power law distribution fitting
 library(fitdistrplus) # Distribution fitting
-library(igraph)     # Network analysis
+library(igraph)       # Network analysis and topology metrics
+library(caret)        # Statistical modeling functions
+library(moments)      # For skewness calculation
 
 # Create necessary directories if they don't exist
 dir.create("./figures", showWarnings = FALSE)
 dir.create("./additional stats", showWarnings = FALSE)
+dir.create("./network tables", showWarnings = FALSE)
 ```
 
 ```{r data loading}
@@ -39,48 +42,52 @@ unstrat_pairs <- read.csv("./pair stats/significant_pairs_unstrat.csv", stringsA
 frequency<-read.csv("./frequency tables/disease_frequencies_unstrat.csv")
 ```
 
+```{r network edge standardization}
+# Standardize edge representation across all networks for comparison
+# Create consistent edge IDs by sorting disease pairs alphabetically
 
-
-```{r age strata network comparison}
-# Clean reference table
-reference <- read.csv("./frequency tables/disease_frequencies_unstrat.csv") %>%
-  select(Code.from.DAP.data, Disease.Name) %>%
-  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
-
-# Map function with fallback
-map_disease_name <- function(code) {
-  clean_code <- sub("^condition_", "", code)
-  ref <- reference$Disease.Name[reference$Code.from.DAP.data == clean_code]
-  if (length(ref) == 1) return(ref)
-  return(code)
+# Function to convert disease codes to numerical codes using frequency table
+get_numerical_code <- function(disease_code) {
+  # Handle condition_ codes
+  if(startsWith(disease_code, "condition_")) {
+    return(as.numeric(sub("^condition_", "", disease_code)))
+  }
+  
+  # Handle hs_cancer_types_ codes using frequency table lookup
+  if(startsWith(disease_code, "hs_cancer_types_")) {
+    match_row <- disease_frequencies[disease_frequencies$Code.from.DAP.data == disease_code, ]
+    if(nrow(match_row) > 0) {
+      return(as.numeric(match_row$Numerical.Codes))
+    }
+  }
+  
+  # Return NA if no match found
+  return(NA)
 }
 
-# Get numeric part for ordering
-get_code_number <- function(code) {
-  as.numeric(sub("^condition_", "", code))
-}
-
-# Full edge standardization with consistent ordering
+# Function to process pairs and create standardized edge identifiers
 process_pairs <- function(df) {
   df %>%
     mutate(
-      code1 = as.numeric(sub("^condition_", "", Disease1)),
-      code2 = as.numeric(sub("^condition_", "", Disease2)),
-      code_left  = pmin(code1, code2),
-      code_right = pmax(code1, code2),
+      code1 = sapply(Disease1, get_numerical_code),
+      code2 = sapply(Disease2, get_numerical_code),
+      code_left = pmin(code1, code2, na.rm = TRUE),
+      code_right = pmax(code1, code2, na.rm = TRUE),
       sorted_pair = paste(code_left, code_right, sep = "-")
     ) %>%
+    # Remove any rows where we couldn't get numerical codes
+    filter(!is.na(code1) & !is.na(code2)) %>%
     pull(sorted_pair)
 }
 
-# Process each dataset to extract edge information
+# Process each dataset to extract standardized edge information
 senior_edges <- process_pairs(senior_pairs)
 mature_edges <- process_pairs(mature_adult_pairs)
 young_edges <- process_pairs(young_adult_pairs)
 puppy_edges <- process_pairs(puppy_pairs)
 unstrat_edges <- process_pairs(unstrat_pairs)
 
-# Create named list of all edge sets
+# Create named list of all edge sets for analysis
 all_edge_sets <- list(
   unstratified = unstrat_edges,
   puppy = puppy_edges,
@@ -88,6 +95,18 @@ all_edge_sets <- list(
   mature_adult = mature_edges,
   senior = senior_edges
 )
+
+cat("Edge sets processed:",
+    "\nUnstratified:", length(unstrat_edges), "edges",
+    "\nPuppy:", length(puppy_edges), "edges", 
+    "\nYoung adult:", length(young_edges), "edges",
+    "\nMature adult:", length(mature_edges), "edges",
+    "\nSenior:", length(senior_edges), "edges\n")
+```
+
+```{r network overlap analysis}
+# Calculate pairwise overlap between all network edge sets
+# This quantifies how many edges are shared between different age groups
 
 # Create overlap matrix to quantify shared edges between networks
 n_sets <- length(all_edge_sets)
@@ -103,7 +122,7 @@ for(i in 1:n_sets) {
   }
 }
 
-# Convert matrix to long format for plotting
+# Convert matrix to long format for analysis and save
 overlap_df <- as.data.frame(overlap_matrix) %>%
   mutate(category = rownames(overlap_matrix)) %>%
   pivot_longer(
@@ -116,7 +135,7 @@ overlap_df <- as.data.frame(overlap_matrix) %>%
 desired_order <- c("unstratified", "puppy", "young_adult", "mature_adult", "senior")
 
 # Create heatmap visualization of edge overlap
-overlap_df %>%
+overlap_heatmap <- overlap_df %>%
   mutate(
     category = factor(category, levels = desired_order),
     comparison = factor(comparison, levels = desired_order)
@@ -152,229 +171,114 @@ overlap_df %>%
   ) +
   coord_fixed()
 
-# Save heatmap figure
-ggsave("./figures/Fig_2d.tiff", width = 8, height = 6, dpi = 600, compression = "lzw")
+print(overlap_heatmap)
 
-ggsave("./figures/Fig_2d.png", width = 8, height = 6, dpi = 600)
+# Save network overlap heatmap
+ggsave("./figures/network_overlap_heatmap.tiff", overlap_heatmap, 
+       width = 8, height = 6, dpi = 600, compression = "lzw")
+
+ggsave("./figures/network_overlap_heatmap.png", overlap_heatmap, 
+       width = 8, height = 6, dpi = 600)
+
+# Save overlap matrix for visualization
+write.csv(overlap_matrix, "./network tables/network_overlap_matrix.csv", row.names = TRUE)
+write.csv(overlap_df, "./network tables/network_overlap_long.csv", row.names = FALSE)
 ```
 
+```{r shared comorbidities across age groups}
+# Identify edges present across multiple age-stratified networks
+# Find core comorbidity relationships that persist across life stages
 
-```{r analysis of shared comorbidities across age groups}
-# Find edges present in all age-stratified networks
-shared_edges <- Reduce(intersect, list(
+# Find edges present in all age-stratified networks (excluding unstratified)
+shared_edges_all_ages <- Reduce(intersect, list(
   young_edges,
   mature_edges,
   senior_edges
 ))
 
-# Count total shared edges
-n_shared <- length(shared_edges)
-
-# Calculate edge counts and percentages
+# Calculate edge counts and percentages for each network
 edge_counts <- list(
   "Unstratified" = length(unstrat_edges),
+  "Puppy" = length(puppy_edges),
   "Young Adult" = length(young_edges),
   "Mature Adult" = length(mature_edges),
   "Senior" = length(senior_edges)
 )
 
-percentages <- sapply(edge_counts, function(x) round(n_shared/x * 100, 1))
+# Calculate what percentage of each network consists of shared edges
+percentages_shared <- sapply(edge_counts, function(x) {
+  if(x > 0) round(length(shared_edges_all_ages) / x * 100, 1) else 0
+})
 
 # Create summary data frame
-summary_df <- data.frame(
+shared_edges_summary <- data.frame(
   Network = names(edge_counts),
   Total_Edges = unlist(edge_counts),
-  Shared_Edges = n_shared,
-  Percent_Shared = percentages
+  Shared_Edges = length(shared_edges_all_ages),
+  Percent_Shared = percentages_shared
 )
-
-# Print results
-cat("Number of edges shared across age-stratified networks:", n_shared, "\n\n")
-cat("Network-specific statistics:\n")
-print(summary_df)
-cat("\nShared edges:\n")
-print(shared_edges)
-
-# Additionally, calculate overlap with unstratified network
-unstrat_overlap <- intersect(shared_edges, unstrat_edges)
-cat("\nNumber of shared edges also present in unstratified network:", 
-    length(unstrat_overlap), "\n")
 
 # Find unique edges for each age group (compared to unstratified)
 young_adult_unique <- setdiff(young_edges, unstrat_edges)
 mature_adult_unique <- setdiff(mature_edges, unstrat_edges)
 senior_unique <- setdiff(senior_edges, unstrat_edges)
 
-# Combine all unique edges
-all_unique_edges <- unique(c(young_adult_unique, mature_adult_unique, senior_unique))
+# Calculate overlap between age-specific unique edges
+age_unique_overlaps <- list(
+  young_mature_shared = intersect(young_adult_unique, mature_adult_unique),
+  young_senior_shared = intersect(young_adult_unique, senior_unique),
+  mature_senior_shared = intersect(mature_adult_unique, senior_unique),
+  all_age_shared = Reduce(intersect, list(young_adult_unique, mature_adult_unique, senior_unique))
+)
 
-# Create summary statistics for unique edges
-summary_stats <- data.frame(
+# Create comprehensive summary statistics
+age_specific_summary <- data.frame(
   Age_Group = c("Young Adult", "Mature Adult", "Senior"),
-  Total_Edges = c(length(young_edges), 
-                 length(mature_edges), 
-                 length(senior_edges)),
-  Unique_Edges = c(length(young_adult_unique), 
-                  length(mature_adult_unique), 
-                  length(senior_unique)),
-  Percent_Unique = c(round(length(young_adult_unique)/length(young_edges)*100, 1),
-                    round(length(mature_adult_unique)/length(mature_edges)*100, 1),
-                    round(length(senior_unique)/length(senior_edges)*100, 1))
+  Total_Edges = c(length(young_edges), length(mature_edges), length(senior_edges)),
+  Unique_Edges = c(length(young_adult_unique), length(mature_adult_unique), length(senior_unique)),
+  Percent_Unique = c(
+    round(length(young_adult_unique) / length(young_edges) * 100, 1),
+    round(length(mature_adult_unique) / length(mature_edges) * 100, 1),
+    round(length(senior_unique) / length(senior_edges) * 100, 1)
+  )
 )
 
-# Print summary statistics
-cat("Summary Statistics:\n")
-print(summary_stats)
-cat("\nTotal number of edges unique to age groups:", length(all_unique_edges), "\n\n")
+# Save results
+write.csv(shared_edges_summary, "./additional stats/shared_edges_summary.csv", row.names = FALSE)
+write.csv(age_specific_summary, "./additional stats/age_specific_summary.csv", row.names = FALSE)
 
-# Analyze overlap between age-specific unique edges
-young_mature_shared <- intersect(young_adult_unique, mature_adult_unique)
-young_senior_shared <- intersect(young_adult_unique, senior_unique)
-mature_senior_shared <- intersect(mature_adult_unique, senior_unique)
-all_age_shared <- Reduce(intersect, list(young_adult_unique, mature_adult_unique, senior_unique))
-
-# Print shared unique edges
-cat("\nEdges shared between age groups (but not in unstratified network):\n")
-cat("\nShared between Young Adult and Mature Adult:", length(young_mature_shared), "edges\n")
-if(length(young_mature_shared) > 0) print(young_mature_shared)
-
-cat("\nShared between Young Adult and Senior:", length(young_senior_shared), "edges\n")
-if(length(young_senior_shared) > 0) print(young_senior_shared)
-
-cat("\nShared between Mature Adult and Senior:", length(mature_senior_shared), "edges\n")
-if(length(mature_senior_shared) > 0) print(mature_senior_shared)
-
-cat("\nShared among all age groups (but not in unstratified network):", 
-    length(all_age_shared), "edges\n")
-if(length(all_age_shared) > 0) print(all_age_shared)
+# Print key findings
+cat("Shared comorbidities analysis:",
+    "\nEdges shared across all age groups:", length(shared_edges_all_ages),
+    "\nEdges unique to individual age groups:", sum(age_specific_summary$Unique_Edges),
+    "\nEdges shared between young-mature only:", length(age_unique_overlaps$young_mature_shared),
+    "\nEdges shared between mature-senior only:", length(age_unique_overlaps$mature_senior_shared), "\n")
 ```
+```{r age group specific edges}
+# Identify edges that are unique to specific age combinations
+# This helps understand developmental patterns in comorbidity
 
-```{r identification of comorbidities specific to unstratified network}
-# Find unique edges for each age group (compared to unstratified)
-young_adult_unique <- setdiff(young_edges, unstrat_edges)
-mature_adult_unique <- setdiff(mature_edges, unstrat_edges)
-senior_unique <- setdiff(senior_edges, unstrat_edges)
+# Compute age group-specific edges (exclusive to each group vs others)
+senior_specific_edges <- setdiff(senior_edges, union(mature_edges, young_edges))
+mature_specific_edges <- setdiff(mature_edges, union(senior_edges, young_edges))
+young_specific_edges <- setdiff(young_edges, union(senior_edges, mature_edges))
 
-# Combine all unique edges
-all_unique_edges <- unique(c(young_adult_unique, mature_adult_unique, senior_unique))
-
-# Create summary statistics
-summary_stats <- data.frame(
-  Age_Group = c("Young Adult", "Mature Adult", "Senior"),
-  Total_Edges = c(length(young_edges), 
-                 length(mature_edges), 
-                 length(senior_edges)),
-  Unique_Edges = c(length(young_adult_unique), 
-                  length(mature_adult_unique), 
-                  length(senior_unique)),
-  Percent_Unique = c(round(length(young_adult_unique)/length(young_edges)*100, 1),
-                    round(length(mature_adult_unique)/length(mature_edges)*100, 1),
-                    round(length(senior_unique)/length(senior_edges)*100, 1))
-)
-
-# Print summary statistics
-cat("Summary Statistics:\n")
-print(summary_stats)
-cat("\nTotal number of edges unique to age groups:", length(all_unique_edges), "\n\n")
-
-# Print detailed lists of unique edges
-cat("\nUnique edges in Young Adult network:\n")
-print(young_adult_unique)
-cat("\nUnique edges in Mature Adult network:\n")
-print(mature_adult_unique)
-cat("\nUnique edges in Senior network:\n")
-print(senior_unique)
-
-# Find edges that appear in multiple age groups but not in unstratified
-young_mature_shared <- intersect(young_adult_unique, mature_adult_unique)
-young_senior_shared <- intersect(young_adult_unique, senior_unique)
-mature_senior_shared <- intersect(mature_adult_unique, senior_unique)
-all_age_shared <- Reduce(intersect, list(young_adult_unique, mature_adult_unique, senior_unique))
-
-# Print shared unique edges
-cat("\nEdges shared between age groups (but not in unstratified network):\n")
-cat("\nShared between Young Adult and Mature Adult:", length(young_mature_shared), "edges\n")
-if(length(young_mature_shared) > 0) print(young_mature_shared)
-
-cat("\nShared between Young Adult and Senior:", length(young_senior_shared), "edges\n")
-if(length(young_senior_shared) > 0) print(young_senior_shared)
-
-cat("\nShared between Mature Adult and Senior:", length(mature_senior_shared), "edges\n")
-if(length(mature_senior_shared) > 0) print(mature_senior_shared)
-
-cat("\nShared among all age groups (but not in unstratified network):", length(all_age_shared), "edges\n")
-if(length(all_age_shared) > 0) print(all_age_shared)
-
-```
-
-```{r}
-# Compute senior-specific edges
-senior_specific_edges <- setdiff(
-  senior_edges,
-  union(mature_edges, young_edges)
-)
-
-# Output summary
-cat("Number of edges unique to senior group (vs mature + young adult):", 
-    length(senior_specific_edges), "\n")
-
-# Optional: print the edges
-print(senior_specific_edges)
-
-# Compute mature adult-specific edges
-mature_specific_edges <- setdiff(
-  mature_edges,
-  union(senior_edges, young_edges)
-)
-
-# Output summary
-cat("Number of edges unique to mature adult group (vs senior + young adult):", 
-    length(mature_specific_edges), "\n")
-
-# Optional: print the edges
-print(mature_specific_edges)
-
-# Compute young adult-specific edges
-young_specific_edges <- setdiff(
-  young_edges,
-  union(senior_edges, mature_edges)
-)
-
-# Output summary
-cat("Number of edges unique to young adult group (vs senior + mature adult):", 
-    length(young_specific_edges), "\n")
-
-# Optional: print the edges
-print(young_specific_edges)
-
-# Helper function to extract unique node IDs from edge strings
+# Function to extract unique node IDs from edge strings
 extract_nodes <- function(edge_vector) {
   unique(unlist(strsplit(edge_vector, "-")))
 }
 
-# Get unique nodes from each edge group
+# Get unique nodes from each age-specific edge group
 senior_unique_nodes <- extract_nodes(senior_specific_edges)
 mature_unique_nodes <- extract_nodes(mature_specific_edges)
 young_unique_nodes <- extract_nodes(young_specific_edges)
 
-# Output
-cat("Unique nodes in senior-specific edges:\n")
-print(senior_unique_nodes)
-
-cat("\nUnique nodes in mature adult-specific edges:\n")
-print(mature_unique_nodes)
-
-cat("\nUnique nodes in young adult-specific edges:\n")
-print(young_unique_nodes)
-
-```
-```{r}
-# Lookup table with names and categories
-lookup_table <- frequency %>%
+# Create detailed edge tables with disease names and categories
+lookup_table <- disease_frequencies %>%
   dplyr::select(Code.from.DAP.data, Disease.Name, Disease.Category) %>%
   mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
 
-# Lookup functions
+# Lookup functions for disease information
 lookup_disease_name <- function(code_number) {
   match <- lookup_table$Disease.Name[lookup_table$Code.from.DAP.data == as.character(code_number)]
   if (length(match) == 1) return(match)
@@ -387,116 +291,162 @@ lookup_disease_category <- function(code_number) {
   return(NA)
 }
 
-# Build senior-specific edge table
-senior_edge_table <- tibble(edge = senior_specific_edges) %>%
-  separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
-  mutate(
-    disease_1 = sapply(code1, lookup_disease_name),
-    category_1 = sapply(code1, lookup_disease_category),
-    disease_2 = sapply(code2, lookup_disease_name),
-    category_2 = sapply(code2, lookup_disease_category),
-    in_unstratified = ifelse(paste(code1, code2, sep = "-") %in% unstrat_edges |
-                             paste(code2, code1, sep = "-") %in% unstrat_edges,
-                             "Yes", "No")
-  ) %>%
-  select(disease_1, category_1, disease_2, category_2, in_unstratified)
-
-# Preview and save
-print(senior_edge_table)
-write.csv(senior_edge_table, "./additional stats/senior_specific_edges_with_categories.csv", row.names = FALSE)
-
-# Lookup table with names and categories
-lookup_table <- frequency %>%
-  select(Code.from.DAP.data, Disease.Name, Disease.Category) %>%
-  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
-
-# Lookup functions
-lookup_disease_name <- function(code_number) {
-  match <- lookup_table$Disease.Name[lookup_table$Code.from.DAP.data == as.character(code_number)]
-  if (length(match) == 1) return(match)
-  return(NA)
+# Build detailed edge tables for each age group
+build_edge_table <- function(edge_vector, age_group_name) {
+  if(length(edge_vector) == 0) {
+    return(data.frame(
+      age_group = character(),
+      disease_1 = character(),
+      category_1 = character(),
+      disease_2 = character(),
+      category_2 = character(),
+      in_unstratified = character()
+    ))
+  }
+  
+  tibble(edge = edge_vector) %>%
+    separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
+    mutate(
+      age_group = age_group_name,
+      disease_1 = sapply(code1, lookup_disease_name),
+      category_1 = sapply(code1, lookup_disease_category),
+      disease_2 = sapply(code2, lookup_disease_name),
+      category_2 = sapply(code2, lookup_disease_category),
+      in_unstratified = ifelse(
+        paste(code1, code2, sep = "-") %in% unstrat_edges |
+        paste(code2, code1, sep = "-") %in% unstrat_edges,
+        "Yes", "No"
+      )
+    ) %>%
+    dplyr::select(age_group, disease_1, category_1, disease_2, category_2, in_unstratified)
 }
 
-lookup_disease_category <- function(code_number) {
-  match <- lookup_table$Disease.Category[lookup_table$Code.from.DAP.data == as.character(code_number)]
-  if (length(match) == 1) return(match)
-  return(NA)
-}
+# Create detailed tables for each age group
+senior_edge_table <- build_edge_table(senior_specific_edges, "Senior")
+mature_edge_table <- build_edge_table(mature_specific_edges, "Mature Adult")
+young_edge_table <- build_edge_table(young_specific_edges, "Young Adult")
 
-# Build senior-specific edge table
-senior_edge_table <- tibble(edge = senior_specific_edges) %>%
-  separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
-  mutate(
-    disease_1 = sapply(code1, lookup_disease_name),
-    category_1 = sapply(code1, lookup_disease_category),
-    disease_2 = sapply(code2, lookup_disease_name),
-    category_2 = sapply(code2, lookup_disease_category),
-    in_unstratified = ifelse(paste(code1, code2, sep = "-") %in% unstrat_edges |
-                             paste(code2, code1, sep = "-") %in% unstrat_edges,
-                             "Yes", "No")
-  ) %>%
-  select(disease_1, category_1, disease_2, category_2, in_unstratified)
+# Combine all age-specific edge tables
+all_age_specific_edges <- bind_rows(senior_edge_table, mature_edge_table, young_edge_table)
 
-# Preview and save
-print(senior_edge_table)
+# Save detailed edge tables
 write.csv(senior_edge_table, "./additional stats/senior_specific_edges_with_categories.csv", row.names = FALSE)
-
-# Reuse the same lookup_table and functions defined above
-
-# Build mature-specific edge table
-mature_edge_table <- tibble(edge = mature_specific_edges) %>%
-  separate(edge, into = c("code1", "code2"), sep = "-", convert = TRUE) %>%
-  mutate(
-    disease_1 = sapply(code1, lookup_disease_name),
-    category_1 = sapply(code1, lookup_disease_category),
-    disease_2 = sapply(code2, lookup_disease_name),
-    category_2 = sapply(code2, lookup_disease_category),
-    in_unstratified = ifelse(paste(code1, code2, sep = "-") %in% unstrat_edges |
-                             paste(code2, code1, sep = "-") %in% unstrat_edges,
-                             "Yes", "No")
-  ) %>%
-  select(disease_1, category_1, disease_2, category_2, in_unstratified)
-
-# Preview and save
-print(mature_edge_table)
 write.csv(mature_edge_table, "./additional stats/mature_specific_edges_with_categories.csv", row.names = FALSE)
+write.csv(young_edge_table, "./additional stats/young_specific_edges_with_categories.csv", row.names = FALSE)
+write.csv(all_age_specific_edges, "./additional stats/all_age_specific_edges.csv", row.names = FALSE)
 
+# Print summary
+cat("Age-specific edge analysis:",
+    "\nSenior-specific edges:", length(senior_specific_edges),
+    "\nMature adult-specific edges:", length(mature_specific_edges),
+    "\nYoung adult-specific edges:", length(young_specific_edges), "\n")
 ```
+```{r unstratified unique edges}
+# Identify edges that appear only in the unstratified network
+# These may represent associations diluted by age stratification
 
-
-```{r identify edges unique to unstratified network}
 # Combine all stratified network edges
-all_stratified_edges <- unique(c(young_edges, mature_edges, senior_edges))
+all_stratified_edges <- unique(c(young_edges, mature_edges, senior_edges, puppy_edges))
 
 # Find edges unique to the unstratified network
 unique_unstrat_edges <- setdiff(unstrat_edges, all_stratified_edges)
 
 # Calculate summary statistics
-n_unique <- length(unique_unstrat_edges)
-percent_unique <- round((n_unique / length(unstrat_edges)) * 100, 1)
+n_unique_unstrat <- length(unique_unstrat_edges)
+percent_unique_unstrat <- round((n_unique_unstrat / length(unstrat_edges)) * 100, 1)
 
-# Print results
-cat("Summary Statistics:\n")
-cat("Total edges in unstratified network:", length(unstrat_edges), "\n")
-cat("Number of edges unique to unstratified network:", n_unique, "\n")
-cat("Percentage of unstratified edges that are unique:", percent_unique, "%\n\n")
+# Create unstratified-specific edge table
+unstrat_edge_table <- build_edge_table(unique_unstrat_edges, "Unstratified Only")
+
+# Save unstratified-specific analysis
+write.csv(unstrat_edge_table, "./additional stats/unstratified_specific_edges.csv", row.names = FALSE)
+
+# Create comprehensive summary of all unique edge patterns
+edge_pattern_summary <- data.frame(
+  Pattern = c("Shared across all age groups", "Senior-specific", "Mature-specific", 
+              "Young-specific", "Unstratified-specific"),
+  Count = c(length(shared_edges_all_ages), length(senior_specific_edges),
+            length(mature_specific_edges), length(young_specific_edges), 
+            n_unique_unstrat),
+  Percent_of_Unstratified = c(
+    round(length(shared_edges_all_ages) / length(unstrat_edges) * 100, 1),
+    round(length(senior_specific_edges) / length(unstrat_edges) * 100, 1),
+    round(length(mature_specific_edges) / length(unstrat_edges) * 100, 1),
+    round(length(young_specific_edges) / length(unstrat_edges) * 100, 1),
+    percent_unique_unstrat
+  )
+)
+
+write.csv(edge_pattern_summary, "./additional stats/edge_pattern_summary.csv", row.names = FALSE)
+
+cat("Unstratified network analysis:",
+    "\nTotal edges in unstratified network:", length(unstrat_edges),
+    "\nEdges unique to unstratified network:", n_unique_unstrat,
+    "\nPercentage unique to unstratified:", percent_unique_unstrat, "%\n")
 ```
+```{r calculate node degrees}
+# Calculate node degrees organically from the unstratified network
+# This provides the degree distribution for statistical analysis
 
+# Create graph from unstratified significant pairs
+unstrat_graph <- graph_from_data_frame(
+  unstrat_pairs %>% dplyr::select(Disease1, Disease2), 
+  directed = FALSE
+)
 
+# Remove isolated vertices (nodes with no connections)
+unstrat_graph <- delete_vertices(unstrat_graph, degree(unstrat_graph) == 0)
 
-```{r network degree distribution analysis}
-# Load and process node data
-node_data <- read.csv("./network attributes/undirected_node_attributes.csv") %>%
-  filter(IsSingleNode == "false",
-         !is.na(as.numeric(shared.name))) %>%
-  pull(Degree)
+# Calculate degree for each node
+node_degrees <- degree(unstrat_graph)
+node_data <- as.numeric(node_degrees)
 
-# Fit distributions to the degree data
-# Power law distribution
+# Create comprehensive node degree table with disease information
+node_degree_table <- data.frame(
+  disease_code = names(node_degrees),
+  degree = node_degrees,
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    # Clean disease codes for matching
+    clean_code = sub("^condition_", "", disease_code),
+    # Add disease names and categories
+    disease_name = sapply(clean_code, function(code) {
+      if(code %in% disease_frequencies$Code.from.DAP.data) {
+        return(disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == code])
+      } else if(code %in% disease_frequencies$Numerical.Codes) {
+        return(disease_frequencies$Disease.Name[disease_frequencies$Numerical.Codes == as.numeric(code)])
+      }
+      return(NA)
+    }),
+    disease_category = sapply(clean_code, function(code) {
+      if(code %in% disease_frequencies$Code.from.DAP.data) {
+        return(disease_frequencies$Disease.Category[disease_frequencies$Code.from.DAP.data == code])
+      } else if(code %in% disease_frequencies$Numerical.Codes) {
+        return(disease_frequencies$Disease.Category[disease_frequencies$Numerical.Codes == as.numeric(code)])
+      }
+      return(NA)
+    })
+  ) %>%
+  arrange(desc(degree))
+
+# Save node degree analysis
+write.csv(node_degree_table, "./additional stats/node_degrees_unstratified.csv", row.names = FALSE)
+
+cat("Node degree calculation:",
+    "\nTotal nodes in unstratified network:", length(node_data),
+    "\nNodes with degree > 0:", sum(node_data > 0),
+    "\nMaximum degree:", max(node_data),
+    "\nMean degree:", round(mean(node_data), 2), "\n")
+```
+```{r analyze degree distribution}
+# Test whether it follows power law or exponential distribution
+
+# Fit power law distribution
 power_fit <- displ$new(node_data)
 power_fit$setPars(estimate_pars(power_fit))
 
-# Exponential distribution
+# Fit exponential distribution
 exp_fit <- disexp$new(node_data)
 exp_fit$setPars(estimate_pars(exp_fit))
 exp_params <- fitdistr(node_data, 'exponential')
@@ -509,12 +459,13 @@ exp_vs_power <- compare_distributions(exp_fit, power_fit)
 degree_freq <- as.data.frame(table(node_data)) %>%
   mutate(
     degrees = as.numeric(as.character(node_data)),
-    Frequency = Freq/sum(Freq)
+    Frequency = Freq / sum(Freq),
+    Cumulative_Freq = cumsum(Frequency)
   ) %>%
-  dplyr::select(degrees, Frequency)
+  dplyr::select(degrees, Frequency, Cumulative_Freq, Count = Freq)
 
 # Generate distribution curves for plotting
-x_values <- seq(1, max(node_data), length.out=1000)
+x_values <- seq(1, max(node_data), length.out = 1000)
 
 curves <- rbind(
   # Exponential curve
@@ -560,129 +511,171 @@ distribution_plot <- ggplot() +
     panel.grid.minor = element_blank()
   )
 
-# Display plot
-distribution_plot
+print(distribution_plot)
 
-# Save plot as publication figure
-ggsave(filename = "Fig_2.tiff", 
+# Save degree distribution plot
+ggsave(filename = "./figures/degree_distribution_analysis.tiff", 
        plot = distribution_plot,
-       path = "./figures", 
+       width = 8, 
+       height = 5, 
+       dpi = 600,
+       compression = "lzw")
+
+ggsave(filename = "./figures/degree_distribution_analysis.png", 
+       plot = distribution_plot,
        width = 8, 
        height = 5, 
        dpi = 600)
 
-# Print statistical results with clear conclusion
-cat("\nDistribution Analysis Results:\n")
-cat("--------------------------------\n")
-cat("Power Law vs Exponential p-value:", power_vs_exp$p_two_sided, "\n")
-cat("Exponential vs Power Law p-value:", exp_vs_power$p_one_sided, "\n")
-cat("\nModel Parameters:\n")
-cat("Exponential rate:", exp_params$estimate, "\n")
-cat("Power law alpha:", power_fit$pars, "\n")
+# Generate distribution parameters and goodness-of-fit statistics
+distribution_results <- data.frame(
+  Distribution = c("Power Law", "Exponential"),
+  Parameter = c(power_fit$pars, exp_params$estimate),
+  Parameter_Name = c("Alpha", "Rate"),
+  LogLikelihood = c(
+    dist_ll(power_fit),
+    sum(dexp(node_data, rate = exp_params$estimate, log = TRUE))
+  ),
+  P_Value_vs_Other = c(power_vs_exp$p_two_sided, exp_vs_power$p_one_sided)
+) %>%
+  mutate(
+    AIC = -2 * LogLikelihood + 2 * c(1, 1)  # Both distributions have 1 parameter
+  )
 
-# Add clear conclusion based on statistical tests
-cat("\nConclusion:\n")
+# Save degree distribution analysis
+write.csv(degree_freq, "./additional stats/degree_frequency_table.csv", row.names = FALSE)
+write.csv(distribution_results, "./additional stats/distribution_comparison.csv", row.names = FALSE)
+
+# Create summary statistics for degree distribution
+degree_stats <- data.frame(
+  Statistic = c("Mean", "Median", "Standard Deviation", "Min", "Max", "Skewness"),
+  Value = c(
+    mean(node_data),
+    median(node_data),
+    sd(node_data),
+    min(node_data),
+    max(node_data),
+    moments::skewness(node_data)
+  )
+)
+
+write.csv(degree_stats, "./additional stats/degree_distribution_stats.csv", row.names = FALSE)
+
+# Print statistical results
+cat("Degree Distribution Analysis:",
+    "\nNumber of nodes analyzed:", length(node_data),
+    "\nMean degree:", round(mean(node_data), 2),
+    "\nPower law alpha:", round(power_fit$pars, 3),
+    "\nExponential rate:", round(exp_params$estimate, 3),
+    "\nP-value (Exp vs Power):", round(exp_vs_power$p_one_sided, 4), "\n")
+
+# Determine best-fitting distribution
 if(exp_vs_power$p_one_sided < 0.05) {
-  cat("The exponential distribution provides a significantly better fit to the data\n")
+  best_fit <- "Exponential distribution provides significantly better fit"
 } else if(power_vs_exp$p_two_sided < 0.05) {
-  cat("The power law distribution provides a significantly better fit to the data\n")
+  best_fit <- "Power law distribution provides significantly better fit"
 } else {
-  cat("Neither distribution provides a significantly better fit than the other\n")
+  best_fit <- "No significant difference between distributions"
 }
-```
 
-```{r network topology}
+cat("Best fitting distribution:", best_fit, "\n")
+```
+```{r network topology metrics}
+# Calculate comprehensive network topology metrics for each age group
+# This includes centrality measures, clustering, and structural properties
+
 # Helper function to format edge data for igraph
-edges_format <- function(pair_table) {
-  pair_table <- pair_table %>%
-    dplyr::select(Disease1, Disease2)
-  vector_edges <- c(t(pair_table))
-  return(vector_edges)
+format_edges_for_igraph <- function(pair_table) {
+  pair_table %>%
+    dplyr::select(Disease1, Disease2) %>%
+    {c(t(.))}
 }
 
-# Create graph objects for each age group
-senior_graph <- edges_format(senior_pairs)
-senior_graph <- make_graph(edges = senior_graph, directed=F)
-senior_lcc <- largest_component(senior_graph)
+# Function to calculate comprehensive network metrics
+calculate_network_metrics <- function(pair_table, network_name) {
+  # Create graph object
+  edge_vector <- format_edges_for_igraph(pair_table)
+  graph <- make_graph(edges = edge_vector, directed = FALSE)
+  
+  # Remove isolated vertices
+  graph <- delete_vertices(graph, degree(graph) == 0)
+  
+  # Get largest connected component
+  largest_comp <- largest_component(graph)
+  
+  # Calculate metrics for full graph
+  full_metrics <- list(
+    network = network_name,
+    component = "full",
+    nodes = vcount(graph),
+    edges = ecount(graph),
+    edge_density = edge_density(graph, loops = FALSE),
+    clustering_coefficient = transitivity(graph, type = "global"),
+    degree_centralization = centr_degree(graph, mode = "all", loops = FALSE, normalized = TRUE)$centralization,
+    betweenness_centralization = centr_betw(graph, directed = FALSE, normalized = TRUE)$centralization,
+    closeness_centralization = centr_clo(graph, mode = "all", normalized = TRUE)$centralization,
+    connected_components = components(graph)$no,
+    largest_component_size = vcount(largest_comp),
+    average_path_length = ifelse(is_connected(graph), mean_distance(graph), NA),
+    diameter = ifelse(is_connected(graph), diameter(graph), NA)
+  )
+  
+  # Calculate metrics for largest connected component
+  lcc_metrics <- list(
+    network = network_name,
+    component = "largest_connected",
+    nodes = vcount(largest_comp),
+    edges = ecount(largest_comp),
+    edge_density = edge_density(largest_comp, loops = FALSE),
+    clustering_coefficient = transitivity(largest_comp, type = "global"),
+    degree_centralization = centr_degree(largest_comp, mode = "all", loops = FALSE, normalized = TRUE)$centralization,
+    betweenness_centralization = centr_betw(largest_comp, directed = FALSE, normalized = TRUE)$centralization,
+    closeness_centralization = centr_clo(largest_comp, mode = "all", normalized = TRUE)$centralization,
+    connected_components = 1,
+    largest_component_size = vcount(largest_comp),
+    average_path_length = mean_distance(largest_comp),
+    diameter = diameter(largest_comp)
+  )
+  
+  return(bind_rows(full_metrics, lcc_metrics))
+}
 
-mature_adult_graph <- edges_format(mature_adult_pairs)
-mature_adult_graph <- make_graph(edges = mature_adult_graph, directed=F)
-mature_adult_lcc <- largest_component(mature_adult_graph)
+# Calculate metrics for all networks
+network_metrics_list <- list(
+  calculate_network_metrics(unstrat_pairs, "unstratified"),
+  calculate_network_metrics(puppy_pairs, "puppy"),
+  calculate_network_metrics(young_adult_pairs, "young_adult"),
+  calculate_network_metrics(mature_adult_pairs, "mature_adult"),
+  calculate_network_metrics(senior_pairs, "senior")
+)
 
-young_adult_graph <- edges_format(young_adult_pairs)
-young_adult_graph <- make_graph(edges = young_adult_graph, directed=F)
-young_adult_lcc <- largest_component(young_adult_graph)
+# Combine all metrics into single dataframe
+all_network_metrics <- bind_rows(network_metrics_list)
 
-# Calculate edge density for all graphs and largest connected components
-edge_densities <- c(
-  edge_density(senior_graph, loops = F),
-  edge_density(mature_adult_graph, loops = F), 
-  edge_density(young_adult_graph, loops = F),
-  edge_density(senior_lcc, loops = F),
-  edge_density(mature_adult_lcc, loops = F), 
-  edge_density(young_adult_lcc, loops = F))
+# Save comprehensive network topology results
+write.csv(all_network_metrics, "./additional stats/network_topology_metrics.csv", row.names = FALSE)
 
-# Calculate closeness centrality measures
-closeness_centralities <- c(
-  centr_clo(senior_graph, mode = c("all"), normalized = T)$centralization,
-  centr_clo(mature_adult_graph, mode = c("all"), normalized = T)$centralization,
-  centr_clo(young_adult_graph, mode = c("all"), normalized = T)$centralization,
-  centr_clo(senior_lcc, mode = c("all"), normalized = T)$centralization,
-  centr_clo(mature_adult_lcc, mode = c("all"), normalized = T)$centralization,
-  centr_clo(young_adult_lcc, mode = c("all"), normalized = T)$centralization)
+# Create summary comparison table (full networks only)
+topology_summary <- all_network_metrics %>%
+  filter(component == "full") %>%
+  dplyr::select(network, nodes, edges, edge_density, clustering_coefficient, 
+         degree_centralization, betweenness_centralization) %>%
+  arrange(desc(nodes))
 
-# Calculate betweenness centrality measures  
-betweenness_centralities <- c(
-  centr_betw(senior_graph, directed = F, normalized = T)$centralization,
-  centr_betw(mature_adult_graph, directed = F, normalized = T)$centralization,
-  centr_betw(young_adult_graph, directed = F, normalized = T)$centralization,
-  centr_betw(senior_lcc, directed = F, normalized = T)$centralization,
-  centr_betw(mature_adult_lcc, directed = F, normalized = T)$centralization,
-  centr_betw(young_adult_lcc, directed = F, normalized = T)$centralization)
+write.csv(topology_summary, "./network tables/topology_summary.csv", row.names = FALSE)
 
-# Calculate degree centrality measures
-network_centralities <- c(
-  centr_degree(senior_graph, mode = "all", loops = F, normalized = T)$centralization,
-  centr_degree(mature_adult_graph, mode = "all", loops = F, normalized = T)$centralization,
-  centr_degree(young_adult_graph, mode = "all", loops = F, normalized = T)$centralization,
-  centr_degree(senior_lcc, mode = "all", loops = F, normalized = T)$centralization,
-  centr_degree(mature_adult_lcc, mode = "all", loops = F, normalized = T)$centralization,
-  centr_degree(young_adult_lcc, mode = "all", loops = F, normalized = T)$centralization)
-
-# Calculate clustering coefficients (transitivity)
-clustering_coefs <- c(
-  transitivity(senior_graph, type = "global"),
-  transitivity(mature_adult_graph, type = "global"),
-  transitivity(young_adult_graph, type = "global"),
-  transitivity(senior_lcc, type = "global"),
-  transitivity(mature_adult_lcc, type = "global"),
-  transitivity(young_adult_lcc, type = "global"))
-
-# Combine all network metrics into a single dataframe
-global_network_stats <- data.frame(
-  edge_densities,
-  clustering_coefs,
-  betweenness_centralities, 
-  network_centralities)
-
-# Add row names for clarity
-row.names(global_network_stats) <- c(
-  "senior_all", "mature_adult_all", "young_adult_all",
-  "senior_lcc", "mature_adult_lcc", "young_adult_lcc")
-
-# Print network statistics
-print(global_network_stats)
+cat("Network topology analysis completed for", length(network_metrics_list), "age groups\n")
+cat("Metrics calculated: density, clustering, centralization, path length, diameter\n")
 ```
 
-```{r}
+```{r breed disease association analysis}
+# Comprehensive analysis of disease prevalence by breed background
+# Compare purebred vs. mixed breed dogs using logistic regression
 
-# Create a reference table from frequency table for disease code lookup
-reference <- read.csv("./frequency tables/disease_frequencies_unstrat.csv") %>%
-  dplyr::select(Code.from.DAP.data, Disease.Name)
-
-# Prepare dataset for analysis: Create combined IVDD column and add derived variables
+# Prepare dataset for breed analysis
 diseases_data <- cleaned_with_healthy_dogs %>%
   mutate(
+    # Create factors and derived variables
     purebred = factor(dd_breed_pure > 0, labels = c("Mixed", "Pure")),
     age = as.numeric(dd_age_years),
     weight = as.numeric(dd_weight_lbs),
@@ -691,214 +684,166 @@ diseases_data <- cleaned_with_healthy_dogs %>%
     sex_4 = as.numeric(recode.sex_4)
   )
 
-# Define specific diseases of interest from literature
-focus_diseases <- c(
-    # Original diseases from first analysis
-    "hs_cancer_types_mast_cell_tumor",
-    "condition_405",  # Atopic dermatitis
-    "condition_1110", # Hip dysplasia
-    "condition_1108", # Elbow dysplasia
-    "condition_1215", # Epilepsy
-    "condition_102",  # Cataracts
-    "condition_1117", # Patellar luxation
-    "condition_1105", # Cruciate ligament
-    "condition_707",  # Bloat
-    "condition_1312", # Hypothyroidism
-    "condition_1304", # Hypoadrenocorticism
-    "condition_1305", # Hyperadrenocorticism
-    "condition_511",  # Cardiomyopathy
-    # Additional diseases of interest
-    "condition_202",  # Ear infection
-    "condition_916",  # UTI
-    "condition_109",  # Corneal ulcer
-    "condition_104",  # KCS
-    "condition_112",  # Entropion
-    "condition_311"   # Retained deciduous teeth
+# Create reference table for disease code lookup
+reference_table <- disease_frequencies %>%
+  dplyr::select(Code.from.DAP.data, Disease.Name) %>%
+  mutate(Code.from.DAP.data = as.character(Code.from.DAP.data))
+
+# Define all disease columns for analysis
+all_disease_columns <- c(
+  "hs_cancer_types_mast_cell_tumor",
+  paste0("condition_", reference_table$Code.from.DAP.data[
+    reference_table$Code.from.DAP.data != "hs_cancer_types_mast_cell_tumor"
+  ])
 )
 
-# Create list of all disease columns for analysis
-all_diseases <- c(
-    "hs_cancer_types_mast_cell_tumor",
-    paste0("condition_", reference$Code.from.DAP.data[reference$Code.from.DAP.data != "hs_cancer_types_mast_cell_tumor"])
-)
-
-# Function to fit model and extract results
+# Function to fit breed comparison model and extract results
 fit_breed_model <- function(disease, data) {
   # Skip if disease column doesn't exist in data
   if(!(disease %in% names(data))) return(NULL)
   
-  # Fit model with purebred status as predictor, adjusting for covariates
+  # Fit logistic regression with breed as predictor, adjusting for covariates
   formula <- as.formula(paste(disease, "~ purebred + age + weight + sex_2 + sex_3 + sex_4"))
-  model <- glm(formula, family = binomial(link = "logit"), data = data)
   
-  # Extract results for purebred coefficient
-  coef <- summary(model)$coefficients["purebredPure", ]
-  odds_ratio <- exp(coef["Estimate"])
-  ci <- exp(coef["Estimate"] + c(-1,1) * 1.96 * coef["Std. Error"])
-  
-  # Return formatted results
-  return(data.frame(
-    Disease = disease,
-    Estimate = coef["Estimate"],
-    StdError = coef["Std. Error"],
-    OddsRatio = odds_ratio,
-    CI_Lower = ci[1],
-    CI_Upper = ci[2],
-    P_Value = coef["Pr(>|z|)"]
-  ))
+  tryCatch({
+    model <- glm(formula, family = binomial(link = "logit"), data = data)
+    
+    # Extract results for purebred coefficient
+    coef_summary <- summary(model)$coefficients
+    if(!"purebredPure" %in% rownames(coef_summary)) return(NULL)
+    
+    coef <- coef_summary["purebredPure", ]
+    odds_ratio <- exp(coef["Estimate"])
+    ci <- exp(coef["Estimate"] + c(-1, 1) * 1.96 * coef["Std. Error"])
+    
+    # Calculate prevalence by breed type
+    prev_mixed <- mean(data[data$purebred == "Mixed", disease], na.rm = TRUE)
+    prev_pure <- mean(data[data$purebred == "Pure", disease], na.rm = TRUE)
+    
+    # Return formatted results
+    return(data.frame(
+      Disease = disease,
+      Estimate = coef["Estimate"],
+      StdError = coef["Std. Error"],
+      OddsRatio = odds_ratio,
+      CI_Lower = ci[1],
+      CI_Upper = ci[2],
+      P_Value = coef["Pr(>|z|)"],
+      Prevalence_Mixed = prev_mixed,
+      Prevalence_Pure = prev_pure,
+      stringsAsFactors = FALSE
+    ))
+  }, error = function(e) {
+    warning(paste("Model failed for disease:", disease, "- Error:", e$message))
+    return(NULL)
+  })
 }
-
-# Create empty lists to store model results
-models <- list()
-results <- data.frame(
-  Disease = character(),
-  Estimate = numeric(),
-  StdError = numeric(),
-  OddsRatio = numeric(),
-  CI_Lower = numeric(),
-  CI_Upper = numeric(),
-  P_Value = numeric(),
-  stringsAsFactors = FALSE
-)
 
 # Run logistic regression models for each disease
-for(disease in all_diseases) {
-  result <- fit_breed_model(disease, diseases_data)
-  if(!is.null(result)) {
-    results <- rbind(results, result)
-    models[[disease]] <- result
-  }
-}
+breed_results <- map_dfr(all_disease_columns, ~fit_breed_model(.x, diseases_data))
 
-# Apply Benjamini-Hochberg correction for multiple testing
-results$P_Adjusted <- p.adjust(results$P_Value, method = "BH")
+# Apply multiple testing correction
+breed_results$P_Adjusted <- p.adjust(breed_results$P_Value, method = "BH")
 
-# Add disease prevalence by breed type
-results <- results %>%
+# Format disease names using reference table
+breed_results_formatted <- breed_results %>%
   mutate(
-    Prevalence_Mixed = sapply(Disease, function(d) {
-      mean(diseases_data[diseases_data$purebred == "Mixed", d], na.rm = TRUE)
-    }),
-    Prevalence_Pure = sapply(Disease, function(d) {
-      mean(diseases_data[diseases_data$purebred == "Pure", d], na.rm = TRUE)
-    })
-  )
-
-# Format disease names using the reference table
-results_formatted <- results %>%
-  mutate(
-    Disease = sapply(Disease, function(d) {
+    Disease_Name = sapply(Disease, function(d) {
       if(grepl("condition_", d)) {
         code <- sub("condition_", "", d)
-        match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
+        match <- reference_table$Disease.Name[reference_table$Code.from.DAP.data == code]
         if(length(match) > 0) return(match)
       }
       if(grepl("hs_cancer_types_", d)) {
-        cancer_name <- gsub("hs_cancer_types_", "", d)
-        cancer_name <- gsub("_", " ", cancer_name)
-        return(paste0(toupper(substr(cancer_name, 1, 1)), 
-                     substr(cancer_name, 2, nchar(cancer_name))))
+        return("Mast cell tumor")
       }
       return(d)
-    })
-  ) %>%
-  arrange(P_Adjusted) %>%
-  mutate(
+    }),
     Risk_Category = case_when(
       P_Adjusted < 0.05 & OddsRatio > 1 ~ "Higher risk in purebred",
       P_Adjusted < 0.05 & OddsRatio < 1 ~ "Higher risk in mixed breed",
       TRUE ~ "No significant difference"
-    )
-  )
+    ),
+    Effect_Size = abs(log(OddsRatio))
+  ) %>%
+  arrange(P_Adjusted)
 
-# Save results for further reference
-write.csv(results_formatted,"./additional stats/breed_odds_ratios.csv")
+# Save comprehensive breed analysis results
+write.csv(breed_results_formatted, "./additional stats/breed_disease_associations_full.csv", row.names = FALSE)
 
-# Create forest plot of focus diseases
-focus_results <- results_formatted %>%
-  filter(Disease %in% sapply(focus_diseases, function(d) {
-    if(d == "ivdd_combined") {
-      return("Intervertebral disc disease (IVDD)")
-    }
-    if(grepl("condition_", d)) {
-      code <- sub("condition_", "", d)
-      match <- reference$Disease.Name[reference$Code.from.DAP.data == code]
-      if(length(match) > 0) return(match)
-    }
-    if(grepl("hs_cancer_types_", d)) {
-      cancer_name <- gsub("hs_cancer_types_", "", d)
-      cancer_name <- gsub("_", " ", cancer_name)
-      return(paste0(toupper(substr(cancer_name, 1, 1)), 
-                   substr(cancer_name, 2, nchar(cancer_name))))
-    }
-    return(d)
-  }))
+# Create summary statistics by risk category
+breed_risk_summary <- breed_results_formatted %>%
+  count(Risk_Category) %>%
+  mutate(Percentage = round(n / sum(n) * 100, 1))
 
-# Create forest plot
-breed_forest_plot <- ggplot(focus_results, aes(y = reorder(Disease, OddsRatio))) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
-  geom_point(aes(x = OddsRatio, color = Risk_Category), size = 3) +
-  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper, color = Risk_Category), height = 0.2) +
-  scale_x_log10(breaks = c(0.25, 0.5, 1, 2, 4), 
-                labels = c("0.25", "0.5", "1", "2", "4")) +
-  scale_color_manual(values = c("Higher risk in mixed breed" = "#00ABC8", 
-                                "Higher risk in purebred" = "#1B365D",
-                                "No significant difference" = "gray60")) +
-  theme_minimal() +
-  labs(x = "Odds Ratio (Purebred vs Mixed)",
-       y = "Disease",
-       color = "Risk Category") +
-  theme(
-    text = element_text(size = 12),
-    legend.position = "bottom",
-    panel.grid.minor = element_blank()
-  )
+write.csv(breed_risk_summary, "./additional stats/breed_risk_summary.csv", row.names = FALSE)
 
-# Display plot
-print(breed_forest_plot)
-
-# Save forest plot
-ggsave("./figures/breed_disease_forest_plot.tiff", 
-       breed_forest_plot, 
-       width = 10, 
-       height = 8, 
-       dpi = 600,
-       compression = "lzw")
-
-# Summarize results by risk category
-cat("Summary of Breed-Related Disease Risks:\n")
-cat("-------------------------------------\n")
-cat("Diseases with higher risk in purebred dogs:", 
-    sum(results_formatted$Risk_Category == "Higher risk in purebred"), "\n")
-cat("Diseases with higher risk in mixed breed dogs:", 
-    sum(results_formatted$Risk_Category == "Higher risk in mixed breed"), "\n")
-cat("Diseases with no significant difference:", 
-    sum(results_formatted$Risk_Category == "No significant difference"), "\n\n")
-
-# Print top 5 diseases with highest purebred odds ratios
-cat("Top 5 diseases with highest risk in purebred dogs:\n")
-results_formatted %>%
+# Identify top diseases with strongest breed associations
+top_purebred_risk <- breed_results_formatted %>%
   filter(Risk_Category == "Higher risk in purebred") %>%
   arrange(desc(OddsRatio)) %>%
-  slice_head(n = 5) %>%
-  dplyr::select(Disease, OddsRatio, P_Adjusted) %>%
-  print()
+  head(10) %>%
+  dplyr::select(Disease_Name, OddsRatio, CI_Lower, CI_Upper, P_Adjusted)
 
-# Print top 5 diseases with highest mixed breed odds ratios
-cat("\nTop 5 diseases with highest risk in mixed breed dogs:\n")
-results_formatted %>%
+top_mixed_risk <- breed_results_formatted %>%
   filter(Risk_Category == "Higher risk in mixed breed") %>%
   arrange(OddsRatio) %>%
-  slice_head(n = 5) %>%
-  dplyr::select(Disease, OddsRatio, P_Adjusted) %>%
-  print()
+  head(10) %>%
+  dplyr::select(Disease_Name, OddsRatio, CI_Lower, CI_Upper, P_Adjusted)
 
+# Save top associations
+write.csv(top_purebred_risk, "./additional stats/top_purebred_risk_diseases.csv", row.names = FALSE)
+write.csv(top_mixed_risk, "./additional stats/top_mixed_risk_diseases.csv", row.names = FALSE)
+
+# Print summary results
+cat("Breed-disease association analysis:",
+    "\nTotal diseases analyzed:", nrow(breed_results_formatted),
+    "\nDiseases with higher risk in purebred dogs:", sum(breed_results_formatted$Risk_Category == "Higher risk in purebred"),
+    "\nDiseases with higher risk in mixed breed dogs:", sum(breed_results_formatted$Risk_Category == "Higher risk in mixed breed"),
+    "\nDiseases with no significant difference:", sum(breed_results_formatted$Risk_Category == "No significant difference"), "\n")
 ```
+```{r save analysis summary}
+# Create comprehensive summary of all analyses performed
+analysis_summary <- data.frame(
+  Analysis = c(
+    "Network Overlap Analysis",
+    "Shared Comorbidities Across Ages", 
+    "Age-Specific Edge Patterns",
+    "Degree Distribution Fitting",
+    "Network Topology Metrics",
+    "Breed-Disease Associations"
+  ),
+  Description = c(
+    "Pairwise overlap between all age-stratified networks",
+    "Edges present across young adult, mature adult, and senior networks",
+    "Edges unique to specific age groups vs. others",
+    "Power law vs. exponential distribution comparison for node degrees",
+    "Centrality, clustering, and structural metrics for all networks",
+    "Logistic regression comparing disease risk in purebred vs. mixed breed dogs"
+  ),
+  Key_Findings = c(
+    paste("Maximum overlap:", max(overlap_matrix[upper.tri(overlap_matrix)]), "edges"),
+    paste("Shared across all ages:", length(shared_edges_all_ages), "edges"),
+    paste("Total age-specific edges:", sum(age_specific_summary$Unique_Edges)),
+    paste("Best fit:", ifelse(exp_vs_power$p_one_sided < 0.05, "Exponential", "Neither")),
+    paste("Networks analyzed:", nrow(topology_summary)),
+    paste("Significant associations:", sum(breed_results_formatted$P_Adjusted < 0.05))
+  ),
+  Output_Files = c(
+    "network_overlap_matrix.csv, network_overlap_long.csv",
+    "shared_edges_summary.csv, age_specific_summary.csv", 
+    "all_age_specific_edges.csv, edge_pattern_summary.csv",
+    "degree_frequency_table.csv, distribution_comparison.csv",
+    "network_topology_metrics.csv, topology_summary.csv",
+    "breed_disease_associations_full.csv, breed_risk_summary.csv"
+  )
+)
+
+write.csv(analysis_summary, "./additional stats/analysis_summary.csv", row.names = FALSE)
+
+cat("\n=== ANALYSIS COMPLETE ===")
+cat("\nAll analytical computations finished successfully.")
+cat("\nResults saved to ./additional stats/ and ./network tables/ directories.")
+cat("\nSummary of analyses:", nrow(analysis_summary), "major analytical components completed.\n")
 ```
-
-
-
-
-
-
 
