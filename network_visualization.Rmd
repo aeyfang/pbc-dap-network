@@ -50,8 +50,10 @@ significant_pairs_s <- read.csv("./results/networks/significant_pairs_senior.csv
 disease_frequencies_s <- read.csv("./data/frequencies/disease_frequencies_senior.csv")
 
 # Load directed network significant pairs (12-month window)
-significant_pairs_directed <- read.csv("./results/networks/significant_pairs_directed_12m.csv") %>%
-  rename(from = source, to = target)
+significant_pairs_directed <- read.csv("./results/networks/significant_pairs_directed_12m.csv") 
+
+edges_directed <- significant_pairs_directed %>% 
+  dplyr::select(source, target)
 
 # Load previously created figure
 p_heatmap <- readRDS("./results/networks/network_overlap_heatmap.rds")
@@ -1416,7 +1418,7 @@ cat("Combined age-stratified publication figure created and saved\n")
 # This shows temporal relationships with collapsed categories and directed edges
 
 # Build directed graph from significant pairs
-g_directed <- graph_from_data_frame(significant_pairs_directed, directed = TRUE)
+g_directed <- graph_from_data_frame(edges_directed, directed = TRUE)
 g_directed <- delete_vertices(g_directed, degree(g_directed) == 0)
 
 # Add node attributes using disease frequency data

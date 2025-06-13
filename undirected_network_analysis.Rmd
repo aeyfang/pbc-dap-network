@@ -41,7 +41,7 @@ for(dir in required_dirs) {
 #
 # NOTE: This script must be run separately for each dataset to generate all networks.
 # The outputs from data_cleaning.Rmd provide the input files for each stratum.
-analysis_type <- "unstrat"
+analysis_type <- "senior"
 ```
 
 ```{r data loading}
@@ -166,76 +166,6 @@ write.csv(coef_df_named,
           row.names = FALSE)
 ```
 
-```{r analyze_model_coefficients}
-# Calculate statistics on model coefficient directions and significance
-# This produces summary counts and percentages for each covariate
-
-# Extract relevant columns from the coefficient results
-coefficient_stats <- coef_pvalue_df %>%
-  filter(Term != "(Intercept)") %>%  # Remove intercept terms
-  dplyr::mutate(
-    # Create categories for direction and significance
-    coef_category = case_when(
-      Coefficient > 0 & P_value < 0.05 ~ "positive_significant",
-      Coefficient > 0 & P_value >= 0.05 ~ "positive_nonsignificant",
-      Coefficient < 0 & P_value < 0.05 ~ "negative_significant",
-      Coefficient < 0 & P_value >= 0.05 ~ "negative_nonsignificant",
-      TRUE ~ "zero_or_NA"
-    ),
-    # Binary flags for various conditions
-    is_significant = P_value < 0.05,
-    is_positive = Coefficient > 0,
-    is_negative = Coefficient < 0
-  )
-
-# Summarize across all covariates
-overall_stats <- coefficient_stats %>%
-  summarise(
-    total_coefficients = n(),
-    positive_significant = sum(coef_category == "positive_significant"),
-    positive_nonsignificant = sum(coef_category == "positive_nonsignificant"),
-    negative_significant = sum(coef_category == "negative_significant"),
-    negative_nonsignificant = sum(coef_category == "negative_nonsignificant"),
-    total_significant = sum(is_significant),
-    significant_positive_percent = round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2)
-  ) %>%
-  dplyr::mutate(
-    positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
-    positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
-    negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
-    negative_nonsignificant_percent = round(negative_nonsignificant / total_coefficients * 100, 2),
-    total_significant_percent = round(total_significant / total_coefficients * 100, 2)
-  )
-
-# Calculate statistics for each covariate separately
-per_covariate_stats <- coefficient_stats %>%
-  group_by(Term) %>%
-  summarise(
-    total_coefficients = n(),
-    positive_significant = sum(coef_category == "positive_significant"),
-    positive_nonsignificant = sum(coef_category == "positive_nonsignificant"),
-    negative_significant = sum(coef_category == "negative_significant"),
-    negative_nonsignificant = sum(coef_category == "negative_nonsignificant"),
-    total_significant = sum(is_significant),
-    significant_positive_percent = if(sum(is_significant) > 0) 
-                                    round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2) 
-                                  else 0
-  ) %>%
-  dplyr::mutate(
-    positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
-    positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
-    negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
-    negative_nonsignificant_percent = round(negative_nonsignificant / total_coefficients * 100, 2),
-    total_significant_percent = round(total_significant / total_coefficients * 100, 2)
-  )
-
-# Print the results
-cat("Overall coefficient statistics:\n")
-print(overall_stats)
-
-cat("\nPer-covariate statistics:\n")
-print(per_covariate_stats)
-```
 
 ```{r calculate individual disease probabilities}
 # Calculate individualized disease probabilities for each dog

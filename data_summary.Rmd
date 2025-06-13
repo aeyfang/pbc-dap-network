@@ -255,6 +255,13 @@ ggsave("./outputs/figures/total_diseases_distribution.png",
 if(file.exists("./results/statistics/diagnosis_date_data.csv")) {
   
   check_data <- read.csv("./results/statistics/diagnosis_date_data.csv")
+  # Fix the age category ordering
+  check_data <- check_data %>%
+    dplyr::mutate(
+      age_cat = factor(age_cat, 
+                      levels = c("0-3", "3-6", "6-9", "9-12", "12-15", "15-18", "18-21", "≥ 21"),
+                      ordered = TRUE)
+    )
   
   # Create boxplot showing medical record length vs. age at last recorded condition
   medical_history_boxplot <- ggplot(data = check_data, 

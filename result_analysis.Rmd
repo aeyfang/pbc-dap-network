@@ -59,6 +59,117 @@ unstrat_pairs <- read.csv("./results/networks/significant_pairs_unstrat.csv", st
 frequency <- read.csv("./data/frequencies/disease_frequencies_unstrat.csv")
 ```
 
+```{r summarize model coefficients}
+# Analyze model coefficient directions and significance patterns
+# This produces summary counts and percentages for each covariate
+
+# Load detailed coefficient data
+coef_pvalue_df <- model_coef %>%
+  dplyr::select(
+    Disease, Disease.Name, Disease.Category,
+    contains("_Coefficient"), contains("_P_value")
+  ) %>%
+  # Convert to long format for analysis
+  pivot_longer(
+    cols = contains("_Coefficient") | contains("_P_value"),
+    names_to = c("Term", ".value"),
+    names_pattern = "(.+)_(Coefficient|P_value)"
+  ) %>%
+  # Clean up term names
+  mutate(
+    Term = case_when(
+      Term == "dd_age_years" ~ "Age",
+      Term == "dd_weight_lbs" ~ "Weight", 
+      Term == "dd_breed_pure_or_mixed" ~ "Mixed Breed",
+      Term == "recode.sex_2" ~ "Female Spayed",
+      Term == "recode.sex_3" ~ "Male Unneutered", 
+      Term == "recode.sex_4" ~ "Male Neutered",
+      TRUE ~ Term
+    )
+  ) %>%
+  filter(!is.na(Coefficient), !is.na(P_value))
+
+# Calculate coefficient categories and statistics
+coefficient_stats <- coef_pvalue_df %>%
+  dplyr::mutate(
+    # Create categories for direction and significance
+    coef_category = case_when(
+      Coefficient > 0 & P_value < 0.05 ~ "positive_significant",
+      Coefficient > 0 & P_value >= 0.05 ~ "positive_nonsignificant",
+      Coefficient < 0 & P_value < 0.05 ~ "negative_significant",
+      Coefficient < 0 & P_value >= 0.05 ~ "negative_nonsignificant",
+      TRUE ~ "zero_or_NA"
+    ),
+    # Binary flags for various conditions
+    is_significant = P_value < 0.05,
+    is_positive = Coefficient > 0,
+    is_negative = Coefficient < 0
+  )
+
+# Summarize across all covariates
+overall_stats <- coefficient_stats %>%
+  summarise(
+    total_coefficients = n(),
+    positive_significant = sum(coef_category == "positive_significant"),
+    positive_nonsignificant = sum(coef_category == "positive_nonsignificant"),
+    negative_significant = sum(coef_category == "negative_significant"),
+    negative_nonsignificant = sum(coef_category == "negative_nonsignificant"),
+    total_significant = sum(is_significant),
+    significant_positive_percent = round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2)
+  ) %>%
+  dplyr::mutate(
+    positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
+    positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
+    negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
+    negative_nonsignificant_percent = round(negative_nonsignificant / total_coefficients * 100, 2),
+    total_significant_percent = round(total_significant / total_coefficients * 100, 2)
+  )
+
+# Calculate statistics for each covariate separately
+per_covariate_stats <- coefficient_stats %>%
+  group_by(Term) %>%
+  summarise(
+    total_coefficients = n(),
+    positive_significant = sum(coef_category == "positive_significant"),
+    positive_nonsignificant = sum(coef_category == "positive_nonsignificant"),
+    negative_significant = sum(coef_category == "negative_significant"),
+    negative_nonsignificant = sum(coef_category == "negative_nonsignificant"),
+    total_significant = sum(is_significant),
+    significant_positive_percent = if(sum(is_significant) > 0) 
+                                    round(sum(is_significant & is_positive) / sum(is_significant) * 100, 2) 
+                                  else 0,
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    positive_significant_percent = round(positive_significant / total_coefficients * 100, 2),
+    positive_nonsignificant_percent = round(positive_nonsignificant / total_coefficients * 100, 2),
+    negative_significant_percent = round(negative_significant / total_coefficients * 100, 2),
+    negative_nonsignificant_percent = round(negative_nonsignificant / total_coefficients * 100, 2),
+    total_significant_percent = round(total_significant / total_coefficients * 100, 2)
+  )
+
+# Save coefficient statistics
+write.csv(overall_stats, "./additional stats/overall_coefficient_stats.csv", row.names = FALSE)
+write.csv(per_covariate_stats, "./additional stats/per_covariate_stats.csv", row.names = FALSE)
+write.csv(coefficient_stats, "./additional stats/detailed_coefficient_stats.csv", row.names = FALSE)
+
+# Print the results
+cat("Overall coefficient statistics:\n")
+print(overall_stats)
+cat("\nPer-covariate statistics:\n")
+print(per_covariate_stats)
+
+# Create summary for manuscript
+covariate_summary <- per_covariate_stats %>%
+  dplyr::select(Term, total_significant, total_significant_percent, 
+         positive_significant, negative_significant) %>%
+  arrange(desc(total_significant_percent))
+
+cat("\nCovariate significance summary (ordered by % significant):\n")
+print(covariate_summary)
+```
+
+
 ```{r coefficient visualization preprocessing}
 # Prepare coefficient data for visualization
 # This section formats the coefficients for heatmap visualization
