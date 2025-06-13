@@ -34,7 +34,7 @@ disease_code <- read.csv(file = "./diseaseCodes.csv", row.names = NULL)
 # Extract key demographic variables (as well as other variables of interest) and convert to appropriate types
 dog_owner <- dog_owner %>%
   dplyr::select(dog_id, dd_age_years, dd_weight_lbs, dd_breed_pure, dd_breed_pure_or_mixed, dd_sex, dd_spayed_or_neutered, od_annual_income_range_usd,mp_flea_and_tick_treatment,mp_heartworm_preventative,od_race_white,od_race_alaska_native,od_race_black_or_african_american,od_race_native_hawaiian,od_race_asian,od_race_other_pacific_islander,od_race_american_indian,od_hispanic, od_max_education) %>%
-  mutate(
+  dplyr::mutate(
     dog_id = as.character(dog_id),
     dd_age_years = as.numeric(dd_age_years),
     dd_weight_lbs = as.numeric(dd_weight_lbs),
@@ -90,11 +90,11 @@ cancer_condition <- cancer_condition %>%
   dplyr::select(dog_id, hs_initial_diagnosis_year, hs_initial_diagnosis_month, 
          starts_with("hs_cancer_types")) %>%
   dplyr::select(-hs_cancer_types_other_description) %>%
-  mutate(dog_id = as.character(dog_id))
+  dplyr::mutate(dog_id = as.character(dog_id))
 
 # Standardize cancer type variables to binary format (0/1)
 cancer_condition <- cancer_condition %>%
-  mutate(across(starts_with("hs_cancer_types"), 
+  dplyr::mutate(across(starts_with("hs_cancer_types"), 
                 ~case_when(
                   tolower(as.character(.)) %in% c("true", "1") ~ 1,
                   tolower(as.character(.)) %in% c("false", "0") ~ 0,
@@ -111,7 +111,7 @@ health_condition_wide <- health_condition %>%
   filter(!is.na(hs_condition)) %>%
   dplyr::select(dog_id, hs_condition) %>%
   distinct() %>%
-  mutate(present = 1,  # Create binary indicator (1 = condition present)
+  dplyr::mutate(present = 1,  # Create binary indicator (1 = condition present)
          dog_id = as.character(dog_id)) %>% 
   pivot_wider(
     id_cols = dog_id,
@@ -121,9 +121,11 @@ health_condition_wide <- health_condition %>%
     values_fill = 0  # Fill missing values with 0 (condition not present)
   ) 
 
-# Consolidate IVDD entries
+# Consolidate diseases that are listed as separate in the survey instrument but are really the (for example, laryngeal paralysis was listed in both the neurological and respiratory categories)
+
+# Consolidate IVDD entries (combines neurologic and orthopedic IVDD codes)
 health_condition_wide <- health_condition_wide %>%
-  mutate(
+  dplyr::mutate(
     condition_1210 = if_else(
       (if("condition_1210" %in% names(.)) condition_1210 else 0) == 1 |
       (if("condition_1111" %in% names(.)) condition_1111 else 0) == 1,
@@ -132,9 +134,9 @@ health_condition_wide <- health_condition_wide %>%
   ) %>%
   dplyr::select(-condition_1111)
 
-# Consolidate laryngeal paralysis entries
+# Consolidate laryngeal paralysis (combines respiratory and neurologic codes)
 health_condition_wide <- health_condition_wide %>%
-  mutate(
+  dplyr::mutate(
     condition_1211 = if_else(
       (if("condition_608" %in% names(.)) condition_608 else 0) == 1 |
       (if("condition_1211" %in% names(.)) condition_1211 else 0) == 1,
@@ -143,30 +145,30 @@ health_condition_wide <- health_condition_wide %>%
   ) %>%
   dplyr::select(-condition_608)
 
-# Consolidate umbilical hernia entries
+# Consolidate umbilical hernia (combines skin and GI codes for same condition)
 health_condition_wide <- health_condition_wide %>%
-  mutate(
+  dplyr::mutate(
     condition_403 = if_else(
       (if("condition_403" %in% names(.)) condition_403 else 0) == 1 |
       (if("condition_704" %in% names(.)) condition_704 else 0) == 1,
       1, 0
     )
   ) %>%
-  dplyr::select(-condition_704)
+  dplyr::dplyr::select(-condition_704)
 
-# Consolidate fracture entries
+# Consolidate fracture entries (combines all bone fracture types into general fracture)
 health_condition_wide <- health_condition_wide %>%
-  mutate(
+  dplyr::mutate(
     condition_1804 = if_else(
-      rowSums(select(., condition_1804:condition_1808), na.rm = TRUE) > 0,
+      rowSums(dplyr::select(., condition_1804:condition_1808), na.rm = TRUE) > 0,
       1, 0
     )
   ) %>%
-  select(-condition_1805, -condition_1806, -condition_1807, -condition_1808)
+  dplyr::select(-condition_1805, -condition_1806, -condition_1807, -condition_1808)
 
-# Consolidate osteoarthritis and degenerative joint disease
+# Consolidate osteoarthritis and degenerative joint disease (same underlying condition)
 health_condition_wide <- health_condition_wide %>%
-  mutate(
+  dplyr::mutate(
     condition_1113 = if_else(
       (if("condition_1113" %in% names(.)) condition_1113 else 0) == 1 |
       (if("condition_1106" %in% names(.)) condition_1106 else 0) == 1,
@@ -176,7 +178,7 @@ health_condition_wide <- health_condition_wide %>%
   dplyr::select(-condition_1106)
 
 health_condition_wide <- health_condition_wide %>%
-  mutate(across(everything(), ~replace_na(., 0))) %>%
+  dplyr::mutate(across(everything(), ~replace_na(., 0))) %>%
   {
     # Ensure condition columns are in numerical order
     condition_cols <- grep("^condition_", names(.), value = TRUE)
@@ -196,7 +198,7 @@ merged_data <- dog_owner %>%
 
 # Replace any remaining NA values with 0 for disease indicators
 merged_data <- merged_data %>%
-  mutate(across(everything(), ~replace_na(., 0)))
+  dplyr::mutate(across(everything(), ~replace_na(., 0)))
 
 # Split data into age cohorts for stratified analysis
 lifestage_strata <- merged_data %>%
@@ -233,7 +235,7 @@ clean_data <- function(data) {
     dplyr::select(all_of(columns_to_keep)) %>%
     # Remove dogs with no diseases
     filter(if_any(c(starts_with("hs_cancer_types"), starts_with("condition_")), ~. == 1)) %>%
-    mutate(
+    dplyr::mutate(
       total_diseases = rowSums(dplyr::select(., starts_with("condition_") | starts_with("hs_cancer_")))
     )
   
@@ -268,7 +270,7 @@ generate_frequency_table <- function(data, suffix = "") {
     dplyr::select(starts_with(c("condition_", "hs_cancer_types_"))) %>%
     summarise(across(everything(), sum)) %>%
     pivot_longer(everything(), names_to = "code", values_to = "frequency") %>%
-    mutate(code = str_remove(code, "condition_"))
+    dplyr::mutate(code = str_remove(code, "condition_"))
   
   # Join with disease code lookup table to get disease names and categories
   disease_frequencies <- disease_code %>%
