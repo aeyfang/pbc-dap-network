@@ -187,6 +187,7 @@ health_condition_wide <- health_condition_wide %>%
   }
 ```
 
+
 ```{r merge and stratify data}
 # Combine dog demographics, cancer conditions, and health conditions
 merged_data <- dog_owner %>%
@@ -204,6 +205,14 @@ lifestage_strata <- merged_data %>%
 
 # Name each stratum for easier reference
 names(lifestage_strata) <- c("mature_adult", "puppy", "senior", "young_adult")
+
+# After merging datasets
+cat("Data merge summary:\n")
+cat("- Total dogs in merged dataset:", nrow(merged_data), "\n")
+cat("- Dogs with at least one condition:", 
+    sum(rowSums(merged_data[, grep("^(condition_|hs_cancer_types)", names(merged_data))]) > 0), "\n")
+cat("- Total unique conditions:", 
+    sum(grepl("^(condition_|hs_cancer_types)", names(merged_data))), "\n\n")
 ```
 
 ```{r data cleaning function}
@@ -250,8 +259,8 @@ walk2(names(lifestage_strata_cleaned), lifestage_strata_cleaned,
       ~write.csv(.y, paste0("./clean data/cleaned_", .x, ".csv"), row.names = FALSE))
 ```
 
-
-```{r generate disease frequency tables}
+```{r}
+# Generate frequency tables and supplementary tables
 # Function to create frequency counts for all diseases in dataset
 generate_frequency_table <- function(data, suffix = "") {
   # Count occurrences of each disease
@@ -267,17 +276,18 @@ generate_frequency_table <- function(data, suffix = "") {
     dplyr::select('Code.from.DAP.data', 'Numerical.Codes', 'Disease.Name', 'Disease.Category', 'frequency') %>%
     arrange(desc(frequency))
   
-  # Update condition name for fracture code 1804
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1804"] <- "Fractured bone"
+  # Update condition names for consolidated conditions
+  condition_updates <- list(
+    "1804" = "Fractured bone",
+    "1210" = "Intervertebral disk disease (IVDD)",
+    "403" = "Umbilical hernia",
+    "1211" = "Laryngeal paralysis",
+    "1113" = "Osteoarthritis/Degenerative joint disease"
+  )
   
-  # Update condition name for IVDD code 1210
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1210"] <- "Intervertebral disk disease (IVDD)"
-  
-  # Update condition name for umbilical hernia 403
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "403"] <- "Umbilical hernia"
-  
-    # Update condition name for laryngeal paralysis 1211
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1211"] <- "Laryngeal paralysis"
+  for(code in names(condition_updates)) {
+    disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == code] <- condition_updates[[code]]
+  }
   
   # Save frequency table to CSV
   write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
@@ -285,20 +295,9 @@ generate_frequency_table <- function(data, suffix = "") {
   return(disease_frequencies)
 }
 
-# Generate frequency table for overall dataset
-overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
-
-# Generate frequency table for overall dataset
-overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
-
-# Generate frequency tables for each stratum with simplified naming
-strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
-                           ~generate_frequency_table(.x, paste0("_", .y)))
-```
-
-```{r}
-# Create and save S1b_Table from overall_frequencies
-write_s1b_table <- function(freq_table) {
+# Function to create supplementary tables from frequency data
+create_supplementary_tables <- function(freq_table, output_dir = "./frequency tables") {
+  # Create S1b Table (condition details)
   s1b_table <- freq_table %>%
     dplyr::select(
       `Condition Name` = Disease.Name,
@@ -306,34 +305,32 @@ write_s1b_table <- function(freq_table) {
       `Frequency` = frequency
     ) %>%
     arrange(desc(Frequency))
-
-  write.csv(s1b_table, "./NEW supplemental figures/S1b_Table.csv", row.names = FALSE)
-
-  return(s1b_table)
-}
-
-# Example usage
-s1b_table <- write_s1b_table(overall_frequencies)
-
-
-# Create and save summary table of number of observed conditions per category
-generate_category_summary_from_frequencies <- function(freq_table) {
-  category_summary <- freq_table %>%
-    dplyr::count(`Disease.Category`, name = "Number of Conditions") %>%
+  
+  # Create S1a Table (category summary)
+  s1a_table <- freq_table %>%
+    count(Disease.Category, name = "Number of Conditions") %>%
     arrange(desc(`Number of Conditions`))
-
-  # Save to CSV
-  write.csv(category_summary, "./NEW supplemental figures/S1a_Table.csv", row.names = FALSE)
-
-  return(category_summary)
+  
+  # Save both tables
+  write.csv(s1b_table, file.path(output_dir, "S1b_Table.csv"), row.names = FALSE)
+  write.csv(s1a_table, file.path(output_dir, "S1a_Table.csv"), row.names = FALSE)
+  
+  return(list(s1b = s1b_table, s1a = s1a_table))
 }
 
-# Example usage using the existing overall_frequencies
-s1a_category_summary <- generate_category_summary_from_frequencies(overall_frequencies)
+# Generate frequency table for overall dataset and create supplementary tables
+overall_frequencies <- generate_frequency_table(merged_data_cleaned, "_unstrat")
+supplementary_tables <- create_supplementary_tables(overall_frequencies)
 
+# Generate frequency tables for each stratum
+strata_frequencies <- map2(lifestage_strata_cleaned, names(lifestage_strata_cleaned),
+                           ~generate_frequency_table(.x, paste0("_", .y)))
 
-
+# Optional: Print summary
+cat("Generated frequency tables for:\n")
+cat("- Overall dataset:", nrow(overall_frequencies), "conditions\n")
+cat("- Stratified datasets:", length(strata_frequencies), "strata\n")
+cat("- Supplementary tables: S1a (categories) and S1b (conditions)\n")
 ```
-
 
 
