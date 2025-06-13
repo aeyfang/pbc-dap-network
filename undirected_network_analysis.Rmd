@@ -32,7 +32,7 @@ dir.create("./reference tables", showWarnings = FALSE, recursive = TRUE)
 #
 # NOTE: This script must be run separately for each dataset to generate all networks.
 # The outputs from data_cleaning.Rmd provide the input files for each stratum.
-analysis_type <- "senior"
+analysis_type <- "unstrat"
 ```
 
 ```{r data loading}
@@ -268,93 +268,95 @@ write.csv(risk_scores_df,
 calculate_pair_statistics <- function(pair) {
   disease1 <- pair[1]
   disease2 <- pair[2]
-  
+
   # Observed co-occurrence count
   test_value <- sum(data[[disease1]] & data[[disease2]])
-  
+  n <- nrow(data)
+
   # Get individual disease probabilities from logistic regression models
   risk1 <- risk_scores_df[[disease1]]
   risk2 <- risk_scores_df[[disease2]]
-  
+
   # Calculate expected co-occurrence under independence
   # This is the sum of the product of individual probabilities
   expected_value <- sum(risk1 * risk2)
-  
+
   # Calculate variance under Poisson binomial distribution
   variance <- sum(risk1 * risk2 * (1 - risk1 * risk2))
-  
-  # Normal approximation for 95% CI
-  z_crit <- qnorm(0.975)
-  ci_lower <- expected_value - z_crit * sqrt(variance)
-  ci_upper <- expected_value + z_crit * sqrt(variance)
-  
-  # Calculate z-score and p-value
+
+  # Estimate 95% CI for the observed value using the Clopper–Pearson exact method
+  # This provides a binomial confidence interval around the observed count
+  obs_ci <- binom.test(test_value, n)$conf.int * n
+
+  # Calculate z-score and one-sided p-value for whether observed > expected
   z_score <- (test_value - expected_value) / sqrt(variance)
   p_value <- 1 - pnorm(z_score)
-  
-  # Check if correlation is positive (more comorbid than expected)
-  # We only want pairs that occur more often than expected by chance
+
+  # Check if observed co-occurrence is greater than expected
+  # We only want edges with positive deviation from independence
   is_positive <- test_value > expected_value
-  
+
+  # Return all statistics for this disease pair
   c(Disease1 = disease1,
     Disease2 = disease2,
     TestValue = test_value, 
     ExpectedValue = expected_value, 
     Variance = variance,
-    CI_Lower = ci_lower,
-    CI_Upper = ci_upper,
     PValue = p_value,
     IsPositive = is_positive)
 }
 
 # Generate all possible disease pairs
+# These are the candidate edges in the comorbidity network
 disease_pairs <- combn(names(responses), 2, simplify = FALSE)
 cat("Analyzing", length(disease_pairs), "disease pairs\n")
 
-# Calculate statistics for all pairs in parallel
+# Calculate statistics for all disease pairs in parallel
 network_attributes <- future_map(
   disease_pairs,
   calculate_pair_statistics,
-  .options = furrr_options(seed = TRUE)
+  .options = furrr_options(seed = TRUE),
+  .progress = TRUE
+  
 )
 
-# Create network dataframe with results for all pairs
+# Combine results into a dataframe
 network_df <- do.call(rbind, network_attributes) %>% 
   as.data.frame() %>%
   mutate(across(TestValue:PValue, as.numeric),
          across(IsPositive, as.logical))
 
-# Apply multiple testing correction (Bonferroni)
+# Apply multiple testing correction using Bonferroni method
 network_df$AdjustedPValue <- p.adjust(network_df$PValue, method = "bonferroni")
 
-# Save all pairs with statistics (including non-significant pairs)
+# Save all pairwise statistics (significant or not)
 write.csv(network_df, paste0("./pair stats/all_pairs_", analysis_type, ".csv"))
 
-# Filter significant positive correlations only
-# These are the edges that will appear in the comorbidity network
+# Filter for significant positive associations
+# These represent pairs that are more comorbid than expected by chance
 significant_pairs <- network_df %>% 
   filter(AdjustedPValue < 0.001, IsPositive == TRUE) %>%
   arrange(AdjustedPValue)
 
 cat("Identified", nrow(significant_pairs), "significant disease pairs\n")
 
-# Format for network visualization in Cytoscape
-# Convert column names to numerical codes for easier reference
+# Prepare for Cytoscape network visualization
+# Convert disease variable names to numerical codes
 formatted_significant_pairs <- significant_pairs %>%
   transmute(
     Disease1 = map_chr(Disease1, clean_disease_name),
     Disease2 = map_chr(Disease2, clean_disease_name)
   )
 
-# Save results for network analysis
-# The significant_pairs file contains all statistics
-# The formatted_pairs file is prepared for direct import into Cytoscape
+# Save both raw statistics and formatted Cytoscape input
+# The full stats go in significant_pairs_*.csv, Cytoscape input is formatted_pairs_*.xlsx
 write.csv(significant_pairs, 
           paste0("./pair stats/significant_pairs_", analysis_type, ".csv"), 
           row.names = FALSE)
 write_xlsx(formatted_significant_pairs,
            paste0("./Cytoscape inputs/formatted_pairs_", analysis_type, ".xlsx"))
 ```
+
 
 ```{r network attribute tables}
 # Create edge attribute table with disease names and p-values
@@ -412,8 +414,7 @@ comprehensive_attribute_table <- network_df %>%
     Disease1, Disease1_key, Disease1_name,
     Disease2, Disease2_key, Disease2_name,
     TestValue, ExpectedValue,
-    Variance, CI_Lower ,
-    CI_Upper,
+    Variance,
     PValue, AdjustedPValue
   ) %>%
   arrange(AdjustedPValue)
@@ -422,7 +423,14 @@ write.csv(comprehensive_attribute_table,
           paste0("./pair stats/comprehensive_edge_attributes_", analysis_type, ".csv"),
           row.names = FALSE)
 
-cat("Network attribute tables generated for", analysis_type, "dataset.\n")
+# Summary output
+cat("\n=== ANALYSIS COMPLETE ===\n")
+cat("Dataset:", analysis_type, "\n")
+cat("Total dogs analyzed:", nrow(data), "\n")
+cat("Diseases included:", ncol(responses), "\n")
+cat("Disease pairs tested:", nrow(network_df), "\n")
+cat("Significant pairs (p < 0.001):", nrow(significant_pairs), "\n")
+cat("Network density:", round(nrow(significant_pairs) / nrow(network_df) * 100, 2), "%\n")
 ```
 
 
