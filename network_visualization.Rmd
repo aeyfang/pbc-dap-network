@@ -36,6 +36,13 @@ disease_frequencies_ma <- read.csv("./frequency tables/disease_frequencies_matur
 significant_pairs_s <- read.csv("./pair stats/significant_pairs_senior.csv")
 disease_frequencies_s <- read.csv("./frequency tables/disease_frequencies_senior.csv")
 
+# Load directed network significant pairs (12-month window)
+significant_pairs_directed <- read.csv("./pair stats/significant_pairs_directed_12m.csv") %>%
+  rename(from = source, to = target)
+
+# Extract edges for directed network
+edges_directed <- significant_pairs_directed %>% dplyr::select(from, to)
+
 # Load previously created figure
 p_heatmap <- readRDS("./network tables/network_overlap_heatmap.rds")
 ```
@@ -1393,20 +1400,291 @@ ggsave(
 print(final_plot)
 cat("Combined age-stratified publication figure created and saved\n")
 ```
+```{r directed network main graph}
+# Create the main directed network visualization
+# This shows temporal relationships with collapsed categories and directed edges
 
+# Build directed graph from significant pairs
+g_directed <- graph_from_data_frame(edges_directed, directed = TRUE)
+g_directed <- delete_vertices(g_directed, degree(g_directed) == 0)
+
+# Add node attributes using disease frequency data
+V(g_directed)$disease_name <- disease_frequencies$Disease.Name[
+  match(V(g_directed)$name, disease_frequencies$Numerical.Codes)
+]
+V(g_directed)$category <- disease_frequencies$Disease.Category[
+  match(V(g_directed)$name, disease_frequencies$Numerical.Codes)
+]
+V(g_directed)$frequency <- disease_frequencies$frequency[
+  match(V(g_directed)$name, disease_frequencies$Numerical.Codes)
+]
+
+# Determine which categories have sufficient nodes to keep separate
+category_counts <- table(V(g_directed)$category)
+keep_categories <- names(category_counts[category_counts > 3])
+
+V(g_directed)$display_category <- ifelse(
+  V(g_directed)$category %in% keep_categories,
+  V(g_directed)$category,
+  "Other"
+)
+
+# Apply label replacements for better readability
+V(g_directed)$disease_name <- dplyr::recode(
+  V(g_directed)$disease_name,
+  !!!label_replacements
+)
+
+# Generate edge categories based on node categories
+edge_list_directed <- as_edgelist(g_directed, names = FALSE)
+
+edge_categories_directed <- apply(edge_list_directed, 1, function(edge) {
+  cat1 <- V(g_directed)$display_category[edge[1]]
+  cat2 <- V(g_directed)$display_category[edge[2]]
+  if (!is.na(cat1) && !is.na(cat2) && cat1 == cat2) {
+    return(cat1)
+  } else {
+    return("Cross-category")
+  }
+})
+E(g_directed)$edge_category <- edge_categories_directed
+
+# Save original graph before collapsing for subgraph creation
+g_uncollapsed_directed <- g_directed
+
+cat("Directed network main graph created:",
+    "\nNodes:", vcount(g_directed),
+    "\nDirected edges:", ecount(g_directed), "\n")
+```
+
+```{r directed network collapsing}
+# Apply strategic node collapsing to the directed network
+# Collapse "Skin" and "Infection/Parasites" categories into aggregate nodes
+
+# Function to collapse nodes by category
+collapse_category_directed <- function(g, category_name, agg_id) {
+  nodes <- V(g)[display_category == category_name]$name
+  g <- add_vertices(g, 1,
+    name = agg_id,
+    disease_name = paste(category_name, "(Aggregate)"),
+    category = category_name,
+    display_category = category_name,
+    frequency = sum(V(g)$frequency[V(g)$name %in% nodes], na.rm = TRUE),
+    label = NA
+  )
+  
+  # Handle incoming edges
+  for (node in nodes) {
+    incoming <- incident(g, node, mode = "in")
+    for (e in incoming) {
+      from_node <- ends(g, e)[1]
+      if (from_node != node) {
+        g <- add_edges(g, c(from_node, agg_id), attr = list(edge_category = E(g)[e]$edge_category))
+      }
+    }
+    
+    # Handle outgoing edges  
+    outgoing <- incident(g, node, mode = "out")
+    for (e in outgoing) {
+      to_node <- ends(g, e)[2]
+      if (to_node != node) {
+        g <- add_edges(g, c(agg_id, to_node), attr = list(edge_category = E(g)[e]$edge_category))
+      }
+    }
+  }
+  
+  g <- delete_vertices(g, nodes)
+  return(g)
+}
+
+# Collapse "Skin" and "Infection/Parasites" categories
+g_directed <- collapse_category_directed(g_directed, "Skin", "skin_agg")
+g_directed <- collapse_category_directed(g_directed, "Infection/Parasites", "infect_agg")
+
+# Set all labels initially
+V(g_directed)$label <- V(g_directed)$disease_name
+
+# Remove labels for aggregate nodes and their neighbors to reduce clutter
+agg_nodes <- c("skin_agg", "infect_agg")
+agg_neighbors <- unique(unlist(neighborhood(g_directed, order = 1, nodes = agg_nodes, mode = "all")))
+agg_neighbor_names <- V(g_directed)$name[agg_neighbors]
+V(g_directed)$label <- ifelse(V(g_directed)$name %in% c(agg_nodes, agg_neighbor_names), NA, V(g_directed)$label)
+
+# Mark aggregate nodes for different styling
+V(g_directed)$is_aggregate <- V(g_directed)$name %in% c("skin_agg", "infect_agg")
+
+cat("Directed network collapsing completed:",
+    "\nCollapsed nodes:", vcount(g_directed),
+    "\nAggregate nodes created:", sum(V(g_directed)$is_aggregate), "\n")
+```
+
+```{r create directed network plot}
+# Create the main directed network visualization
+# Shows temporal relationships with arrows indicating direction
+
+# Convert to tidygraph for ggraph
+tg_directed <- as_tbl_graph(g_directed) %>%
+  mutate(
+    disease_name = V(g_directed)$disease_name,
+    frequency = V(g_directed)$frequency,
+    display_category = V(g_directed)$display_category,
+    is_aggregate = V(g_directed)$is_aggregate
+  ) %>%
+  activate(edges) %>%
+  mutate(edge_category = E(g_directed)$edge_category)
+
+# Create layout for directed network
+layout_directed <- create_layout(tg_directed, layout = "fr")
+
+# Create main directed network plot
+p_directed <- ggraph(layout_directed) +
+  geom_edge_link(
+    aes(color = edge_category),
+    alpha = 0.5,
+    arrow = arrow(length = unit(3, "mm")),
+    end_cap = circle(3, "mm")
+  ) +
+  geom_node_point(
+  aes(
+    size = frequency,
+    color = display_category,
+    shape = is_aggregate
+  ),
+  alpha = 0.9,
+  stroke = 1.5
+) +
+  geom_node_label(
+    aes(label = label),
+    label.size = 0.3,
+    label.r = unit(0.15, "lines"),
+    fill = alpha("white", 0.7),
+    color = "black",
+    fontface = "plain",
+    size = 3,
+    repel = TRUE,
+    na.rm = TRUE
+  ) +
+  scale_edge_color_manual(values = c(category_palette, "Cross-category" = "grey38"), name = "Edge Category") +
+  scale_color_manual(values = category_palette, name = "Node Category") +
+  scale_size_continuous(
+    name = "Frequency",
+    range = c(2, 7),
+    breaks = c(1000, 5000, 10000, 20000)
+  ) +
+  scale_shape_manual(
+  values = c(`TRUE` = 21, `FALSE` = 16),
+  name = "Node Type",
+  labels = c("FALSE" = "Individual", "TRUE" = "Aggregate")
+) +
+  theme_void()
+
+ggsave(
+  filename = "./network images/directed_12m.png",
+  plot = p_directed,
+  dpi = 600,
+  width = 10,
+  height = 8,
+  units = "in"
+)
+
+print(p_directed)
+
+cat("Main directed network plot created and saved\n")
+```
+```{r directed subgraph and combined figure}
+# Create detailed subgraph and combined figure for directed network
+
+# Get detailed subgraph of skin and infection/parasites
+detailed_categories <- c("Skin", "Infection/Parasites")
+core_nodes <- V(g_uncollapsed_directed)[display_category %in% detailed_categories]$name
+neighbor_indices <- neighborhood(g_uncollapsed_directed, order = 1, nodes = core_nodes, mode = "all")
+neighbor_names <- unique(unlist(lapply(neighbor_indices, \(x) V(g_uncollapsed_directed)$name[x])))
+detailed_subgraph_nodes <- unique(c(core_nodes, neighbor_names))
+
+subgraph_detailed <- induced_subgraph(g_uncollapsed_directed, vids = detailed_subgraph_nodes)
+
+# Create detailed subgraph plot
+tg_detailed <- as_tbl_graph(subgraph_detailed) %>%
+  mutate(
+    disease_name = V(subgraph_detailed)$disease_name,
+    frequency = V(subgraph_detailed)$frequency,
+    display_category = V(subgraph_detailed)$display_category,
+    is_aggregate = FALSE
+  ) %>%
+  activate(edges) %>%
+  mutate(edge_category = E(subgraph_detailed)$edge_category)
+
+layout_detailed <- create_layout(tg_detailed, layout = "fr")
+
+p_detailed <- ggraph(layout_detailed) +
+  geom_edge_link(
+    aes(color = edge_category),
+    alpha = 0.5,
+    arrow = arrow(length = unit(3, "mm")),
+    end_cap = circle(3, "mm")
+  ) +
+  geom_node_point(
+    aes(size = frequency, color = display_category, shape = is_aggregate),
+    alpha = 0.9,
+    stroke = 1.5
+  ) +
+  geom_node_label(
+    aes(label = disease_name),
+    label.size = 0.3,
+    label.r = unit(0.15, "lines"),
+    fill = alpha("white", 0.7),
+    color = "black",
+    size = 3,
+    repel = TRUE,
+    na.rm = TRUE
+  ) +
+  scale_edge_color_manual(values = c(category_palette, "Cross-category" = "grey38"), name = "Edge Category") +
+  scale_color_manual(values = category_palette, name = "Node Category") +
+  scale_size_continuous(name = "Frequency", range = c(2, 7), breaks = c(1000, 5000, 10000, 20000)) +
+  scale_shape_manual(values = c(`TRUE` = 21, `FALSE` = 16), name = "Node Type") +
+  theme_void()
+
+# Create combined directed figure
+p_directed_clean <- p_directed + theme(legend.position = "none", plot.margin = margin(b=20)) 
+p_detailed_clean <- p_detailed + theme(legend.position = "none", plot.margin = margin(t=20))
+
+shared_legend_directed <- cowplot::get_legend(
+  p_directed + theme(legend.position = "right", legend.title = element_text(size = 16), legend.text = element_text(size = 14))
+)
+
+stacked_directed <- cowplot::plot_grid(p_directed_clean, p_detailed_clean, ncol = 1, rel_heights = c(1, 1))
+
+labeled_stacked_directed <- cowplot::ggdraw(stacked_directed) +
+  cowplot::draw_plot_label(
+    label = c("a)", "b)"), x = c(0.01, 0.01), y = c(0.99, 0.49),
+    hjust = 0, vjust = 1, fontface = "bold", size = 14
+  )
+
+combined_directed_plot <- cowplot::plot_grid(labeled_stacked_directed, shared_legend_directed, ncol = 2, rel_widths = c(4, 1))
+
+# Save combined directed figure
+ggsave("./network images/combined_directed.tiff", combined_directed_plot, dpi = 600, width = 12, height = 14, units = "in", compression = "lzw")
+ggsave("./network images/combined_directed.png", combined_directed_plot, dpi = 600, width = 12, height = 14, units = "in")
+
+print(combined_directed_plot)
+
+```
 
 ```{r visualization summary}
 # Create comprehensive summary of all visualizations produced
 visualization_summary <- data.frame(
   Visualization = c(
-    "Main Collapsed Network",
+    "Main Collapsed Network (Undirected)",
     "Ear Infection Subgraph", 
-    "Combined Main Figure",
+    "Combined Main Figure (Undirected)",
     "Young Adult Network",
     "Mature Adult Collapsed",
     "Senior Collapsed",
     "Network Overlap Heatmap",
-    "Combined Age-Stratified Figure"
+    "Combined Age-Stratified Figure",
+    "Main Directed Network",
+    "Directed Subgraph Detail",
+    "Combined Directed Figure"
   ),
   Description = c(
     "Main comorbidity network with collapsed categories and highlighted edges",
@@ -1416,38 +1694,24 @@ visualization_summary <- data.frame(
     "Mature adult network with skin and infection/parasites collapsed",
     "Senior network with skin and infection/parasites collapsed", 
     "Heatmap showing edge overlap quantification between age groups",
-    "2x2 grid combining all age networks with overlap analysis"
+    "2x2 grid combining all age networks with overlap analysis",
+    "Directed network showing temporal relationships with collapsed categories",
+    "Detailed view of skin and infection/parasites temporal connections",
+    "Two-panel directed figure with main network and detail view"
   ),
-  Output_Files = c(
-    "undirected_network_graph.png",
-    "Part of final_network_layout",
-    "final_network_layout.png/tiff",
-    "young_adult_network_graph.png",
-    "mature_adult_network_graph_collapsed.png",
-    "senior_network_graph_collapsed.png",
-    "Part of combined figure",
-    "combined_2x2_with_heatmap_cowplot_legend.png/tiff"
-  ),
-  Key_Features = c(
-    "Node collapsing, edge highlighting, aggregate vs individual styling",
-    "Focused view of disease connections, consistent with main network colors",
-    "Publication-ready two-panel layout with shared legend",
-    "All nodes labeled, consistent frequency scaling across age groups",
-    "Strategic collapsing of high-frequency categories, italic aggregate labels",
-    "Strategic collapsing of high-frequency categories, italic aggregate labels",
-    "Quantitative overlap matrix, upper-triangle visualization",
-    "Comprehensive age comparison with quantitative overlap analysis"
+  Network_Type = c(
+    "Undirected", "Undirected", "Undirected", "Undirected", "Undirected", 
+    "Undirected", "Undirected", "Undirected", "Directed", "Directed", "Directed"
   )
 )
 
-# Save visualization summary
-write.csv(visualization_summary, "./network images/undirected_visualization_summary.csv", row.names = FALSE)
+write.csv(visualization_summary, "./network images/comprehensive_visualization_summary.csv", row.names = FALSE)
 
-cat("\n=== UNDIRECTED NETWORK VISUALIZATION COMPLETE ===")
-cat("\nAll network visualizations created successfully.")
-cat("\nOutput saved to ./network images/ directory.")
-cat("\nVisualizations created:", nrow(visualization_summary), "different configurations.")
-cat("\nKey outputs: Main collapsed network, ear infection subgraph, age-stratified comparisons\n")
+cat("\n=== COMPREHENSIVE NETWORK VISUALIZATION COMPLETE ===")
+cat("\nBoth undirected and directed network visualizations created successfully.")
+cat("\nTotal visualizations:", nrow(visualization_summary))
+cat("\n  - Undirected networks:", sum(visualization_summary$Network_Type == "Undirected"))
+cat("\n  - Directed networks:", sum(visualization_summary$Network_Type == "Directed"), "\n")
 ```
 
 
