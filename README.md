@@ -167,20 +167,6 @@ library(patchwork)      # Additional plot layout
 library(ggforce)        # Extended ggplot functionality
 ```
 
-## Output Summary
-
-### Main Figures
-- **Figure 1**: Study demographic overview and disease distributions
-- **Main Network Figure**: Collapsed undirected comorbidity network with subgraph detail
-- **Age Comparison Figure**: 2×2 grid of age-stratified networks with overlap heatmap  
-- **Temporal Figure**: Directed network showing disease precedence relationships
-
-### Supplementary Materials
-- **S1 Tables**: Disease categories and frequency listings
-- **S2 Figure**: Coefficient heatmap showing demographic associations
-- **S3 Figure**: Medical record length analysis
-- Network topology and degree distribution analyses
-
 ## Citation
 
 If you use this code in your research, please cite the associated publication and acknowledge the Dog Aging Project for data access.
