@@ -259,9 +259,13 @@ risk_scores <- future_map(names(responses), function(disease) {
 })
 
 # Extract probabilities into a dataframe
-risk_scores_df <- map(risk_scores, "probabilities") %>%
-  bind_cols() %>%
-  setNames(names(responses))
+risk_scores_df <- data %>%
+  dplyr::select(dog_id) %>%
+  bind_cols(
+    map(risk_scores, "probabilities") %>%
+    bind_cols() %>%
+    setNames(names(responses))
+  )
 
 # Save individual probabilities for each disease
 # These will be used in the comorbidity network generation

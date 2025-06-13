@@ -18,22 +18,20 @@ plan(multisession)
 
 # Ensure all required directories exist
 
+# Consolidated directory structure
 required_dirs <- c(
-  "./clean data", 
-  "./individual stats",
-  "./pair stats", 
-  "./directed network",
-  "./network tables",
-  "./frequency tables",
-  "./reference tables"
+  "./data/clean",
+  "./data/frequencies",
+  "./results/models",
+  "./results/networks",
+  "./results/statistics",
+  "./outputs/figures",
+  "./outputs/tables"
 )
 
 # Create directories if they don't exist
 for(dir in required_dirs) {
-  if(!dir.exists(dir)) {
-    dir.create(dir, recursive = TRUE)
-    message(paste("Created directory:", dir))
-  }
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 }
 
 # Define the sliding window size in months
@@ -64,11 +62,10 @@ load("./DAP_2021_HLES_dog_owner_v1.0.RData")
 dog_owner <- HLES_dog_owner
 
 # Load previously processed data files
-cleaned_data <- read.csv("./clean data/cleaned_unstrat.csv")
-personalized_probability <- read.csv("./individual stats/probability_unstrat.csv")
-personalized_probability <- cbind(dog_id = cleaned_data$dog_id, personalized_probability)
-undirected_comorbid_pairs <- read.csv("./network tables/formatted_pairs_unstrat.csv")
-disease_frequencies <- read_csv("./frequency tables/disease_frequencies_unstrat.csv")
+cleaned_data <- read.csv("./data/clean/cleaned_unstrat.csv")
+personalized_probability <- read.csv("./results/models/probability_unstrat.csv")
+undirected_comorbid_pairs <- read.csv("./results/networks/significant_pairs_unstrat.csv")  
+disease_frequencies <- read_csv("./data/frequencies/disease_frequencies_unstrat.csv")
 ```
 
 
@@ -261,7 +258,7 @@ check_data <- final_data %>%
   )
 
 # Save processed medical history data for visualization
-write.csv(check_data, "./directed network/diagnosis_date_data.csv", row.names = FALSE)
+write.csv(check_data, "./results/statistics/diagnosis_date_data.csv", row.names = FALSE)
 
 ```
 
@@ -458,7 +455,7 @@ direct_expected_counts <- suppressWarnings({
 # Save temporal analysis results
 write.csv(
   direct_expected_counts,
-  sprintf("./directed network/direct_expected_and_actual_counts_%dm.csv", window_size),
+  sprintf("./results/networks/direct_expected_and_actual_counts_%dm.csv", window_size),
   row.names = FALSE
 )
 
