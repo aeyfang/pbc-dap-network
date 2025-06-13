@@ -164,7 +164,7 @@ health_condition_wide <- health_condition_wide %>%
   ) %>%
   select(-condition_1805, -condition_1806, -condition_1807, -condition_1808)
 
-#Consolodiate osteoarthritis and degenerative joint disease
+# Consolidate osteoarthritis and degenerative joint disease
 health_condition_wide <- health_condition_wide %>%
   mutate(
     condition_1113 = if_else(
@@ -277,7 +277,7 @@ generate_frequency_table <- function(data, suffix = "") {
   disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "403"] <- "Umbilical hernia"
   
     # Update condition name for laryngeal paralysis 1211
-  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1211"] <- "Larygneal paralysis"
+  disease_frequencies$Disease.Name[disease_frequencies$Code.from.DAP.data == "1211"] <- "Laryngeal paralysis"
   
   # Save frequency table to CSV
   write.csv(disease_frequencies, paste0("./frequency tables/disease_frequencies", suffix, ".csv"), row.names = FALSE)
