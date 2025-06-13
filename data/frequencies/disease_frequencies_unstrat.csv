@@ -1,0 +1,161 @@
+"Code.from.DAP.data","Numerical.Codes","Disease.Name","Disease.Category","frequency"
+"1804",1804,"Fractured bone","Trauma",23401
+"304",304,"Dental calculus (yellow build-up on teeth)","Mouth/Dental/Oral",4906
+"305",305,"Extracted teeth","Mouth/Dental/Oral",4499
+"1801",1801,"Dog bite","Trauma",3566
+"1113",1113,"Osteoarthritis/Degenerative joint disease","Bone/Orthopedic",2404
+"1617",1617,"Giardia","Infection/Parasites",2379
+"202",202,"Ear Infection","Ear/Nose/Throat",2348
+"426",426,"Seasonal allergies","Skin",2236
+"306",306,"Fractured teeth","Mouth/Dental/Oral",2153
+"1817",1817,"Torn or broken toenail","Trauma",1743
+"1898",1898,"Other trauma","Trauma",1683
+"1605",1605,"Bordetella and/or parainfluenza (kennel cough)","Infection/Parasites",1556
+"1701",1701,"Chocolate","Toxin consumption",1530
+"504",504,"Murmur","Cardiac",1436
+"423",423,"Pruritis (itchy skin)","Skin",1389
+"102",102,"Cataracts","Eye",1374
+"1812",1812,"Laceration","Trauma",1179
+"1105",1105,"Cruciate ligament rupture","Bone/Orthopedic",1157
+"428",428,"Sebaceous cysts","Skin",1101
+"307",307,"Gingivitis (red, puffy gums)","Mouth/Dental/Oral",1061
+"412",412,"Food or medicine allergies that affect the skin","Skin",1015
+"406",406,"Chronic or recurrent hot spots","Skin",984
+"1637",1637,"Tapeworms","Infection/Parasites",975
+"916",916,"Urinary tract infection (chronic or recurrent)","Kidney/Urinary",974
+"411",411,"Fleas","Skin",967
+"498",498,"Other skin condition","Skin",967
+"1634",1634,"Roundworms","Infection/Parasites",963
+"708",708,"Chronic or recurrent diarrhea","Gastrointestinal",959
+"405",405,"Atopic dermatitis (atopy)","Skin",919
+"108",108,"Conjunctivitis","Eye",904
+"1198",1198,"Other orthopedic condition","Bone/Orthopedic",861
+"1622",1622,"Hookworms","Infection/Parasites",858
+"1627",1627,"Lyme disease","Infection/Parasites",854
+"432",432,"Ticks","Skin",849
+"705",705,"Anal sac impaction","Gastrointestinal",835
+"713",713,"Foreign body ingestion or blockage","Gastrointestinal",812
+"1117",1117,"Patellar luxation","Bone/Orthopedic",798
+"712",712,"Food or medicine allergies","Gastrointestinal",786
+"205",205,"Hearing loss (incompletely deaf)","Ear/Nose/Throat",776
+"915",915,"Urinary incontinence","Kidney/Urinary",775
+"1110",1110,"Hip dysplasia","Bone/Orthopedic",769
+"198",198,"Other eye condition","Eye",758
+"1215",1215,"Seizures (including epilepsy)","Brain/Neurologic",727
+"1798",1798,"Other ToxinConsumption","Toxin consumption",701
+"809",809,"Pancreatitis","Liver/Pancreas",680
+"1616",1616,"Gastrointestinal parasites","Infection/Parasites",658
+"1312",1312,"Hypothyroidism (low thyroid function)","Endocrine",626
+"1112",1112,"Lameness (chronic or recurrent)","Bone/Orthopedic",602
+"hs_cancer_types_unknown",2099,"Unknown cancer","Cancer",594
+"407",407,"Chronic or recurrent skin infections","Skin",586
+"1813",1813,"Penetrating wound (such as a stick)","Trauma",568
+"1619",1619,"Heartworm infection","Infection/Parasites",557
+"1703",1703,"Grapes or raisins","Toxin consumption",557
+"201",201,"Deafness","Ear/Nose/Throat",556
+"1609",1609,"Coccidia","Infection/Parasites",528
+"798",798,"Other gastrointestinal condition","Gastrointestinal",517
+"398",398,"Other oral condition","Mouth/Dental/Oral",510
+"914",914,"Urinary crystals or stones in bladder or urethra","Kidney/Urinary",506
+"1810",1810,"Hit by car or other vehicle","Trauma",502
+"410",410,"Flea allergy dermatitis","Skin",478
+"1704",1704,"Ingestion of human medications","Toxin consumption",477
+"1816",1816,"Tail injury","Trauma",464
+"408",408,"Contact dermatitis","Skin",452
+"404",404,"Alopecia (hair loss)","Skin",451
+"313",313,"Underbite","Mouth/Dental/Oral",437
+"1803",1803,"Fall from height","Trauma",421
+"hs_cancer_types_mast_cell_tumor",2020,"Mast cell tumor","Cancer",421
+"1210",1210,"Intervertebral disk disease (IVDD)","Brain/Neurologic",420
+"1698",1698,"Other infectious disease","Infection/Parasites",407
+"709",709,"Chronic or recurrent vomiting","Gastrointestinal",389
+"415",415,"Non-specific dermatosis","Skin",387
+"109",109,"Corneal ulcer","Eye",376
+"298",298,"Other ear condition","Ear/Nose/Throat",376
+"1802",1802,"Bite wound from another animal","Trauma",369
+"1601",1601,"Anaplasmosis","Infection/Parasites",355
+"203",203,"Ear Mites","Ear/Nose/Throat",338
+"104",104,"Keratoconjunctivitis sicca (KCS)","Eye",337
+"414",414,"Lick granuloma","Skin",337
+"1640",1640,"Whipworms","Infection/Parasites",325
+"424",424,"Pyoderma or bacterial dermatitis","Skin",317
+"101",101,"Blindness","Eye",302
+"1298",1298,"Other neurologic condition","Brain/Neurologic",296
+"1614",1614,"Ehrlichiosis","Infection/Parasites",294
+"1705",1705,"Ingestion of recreational drugs","Toxin consumption",294
+"311",311,"Retained deciduous (baby) teeth","Mouth/Dental/Oral",292
+"714",714,"Hemorrhagic gastroenteritis (HGE) or stress colitis (acute)","Gastrointestinal",292
+"1630",1630,"Parvovirus","Infection/Parasites",292
+"605",605,"Chronic or recurrent cough","Respiratory",277
+"898",898,"Other liver condition","Liver/Pancreas",274
+"998",998,"Other kidney condition","Kidney/Urinary",272
+"908",908,"Chronic kidney disease","Kidney/Urinary",265
+"116",116,"Nuclear sclerosis","Eye",259
+"hs_cancer_types_lipoma",2018,"Lipoma","Cancer",249
+"107",107,"Third eyelid prolapse (cherry eye)","Eye",233
+"1108",1108,"Elbow dysplasia","Bone/Orthopedic",222
+"1598",1598,"Other congenital disorder","Other congenital disorder",217
+"1118",1118,"Rheumatoid arthritis","Bone/Orthopedic",209
+"112",112,"Entropion (eyelid rolled in)","Eye",207
+"206",206,"Hematoma","Ear/Nose/Throat",205
+"1305",1305,"Cushing's disease (hyperadrenocorticism; excess adrenal function)","Endocrine",205
+"610",610,"Pneumonia","Respiratory",199
+"612",612,"Tracheal collapse","Respiratory",199
+"1709",1709,"Mouse or rat bait/poison (Other/Unknown)","Toxin consumption",193
+"1809",1809,"Head trauma due to any cause","Trauma",191
+"430",430,"Systemic demodectic mange","Skin",189
+"1815",1815,"Snakebite","Trauma",184
+"1205",1205,"Dementia or senility","Brain/Neurologic",182
+"1015",1015,"Recessed vulva","Reproductive",174
+"1216",1216,"Vestibular disease","Brain/Neurologic",174
+"519",519,"Valve disease","Cardiac",168
+"512",512,"Congestive heart failure","Cardiac",165
+"1119",1119,"Spondylosis","Bone/Orthopedic",156
+"1211",1211,"Laryngeal paralysis","Brain/Neurologic",154
+"1708",1708,"Mouse or rat bait/poison (Warfarin)","Toxin consumption",154
+"510",510,"Arrhythmia","Cardiac",153
+"403",403,"Umbilical hernia","Skin",152
+"1098",1098,"Other reproductive condition","Reproductive",150
+"698",698,"Other respiratory condition","Respiratory",148
+"425",425,"Sarcoptic mange","Skin",146
+"1710",1710,"Overdose of medications prescribed to the dog","Toxin consumption",143
+"103",103,"Glaucoma","Eye",141
+"719",719,"Other allergies","Gastrointestinal",138
+"1998",1998,"Other Immune","Immune-mediated",131
+"598",598,"Other Cardiac","Cardiac",126
+"310",310,"Overbite","Mouth/Dental/Oral",124
+"706",706,"Bilious vomiting syndrome","Gastrointestinal",123
+"1811",1811,"Kicked by horse or other large animal","Trauma",121
+"1612",1612,"Dermatophytosis (ringworm)","Infection/Parasites",111
+"803",803,"Chronic inflammatory liver disease","Liver/Pancreas",109
+"511",511,"Cardiomyopathy","Cardiac",108
+"1001",1001,"Cryptorchid","Reproductive",107
+"711",711,"Fecal incontinence","Gastrointestinal",103
+"602",602,"Tracheal stenosis (narrowing)","Respiratory",101
+"208",208,"Rhinitis","Ear/Nose/Throat",99
+"514",514,"Hypertension (high blood pressure)","Cardiac",98
+"hs_cancer_types_soft_tissue_sarcoma",2031,"Soft tissue sarcoma","Cancer",97
+"1307",1307,"Diabetes mellitus (common diabetes which causes high blood sugar)","Endocrine",96
+"710",710,"Constipation","Gastrointestinal",95
+"1304",1304,"Addison's disease (hypoadrenocorticism; low adrenal function)","Endocrine",93
+"1017",1017,"Vaginitis","Reproductive",92
+"hs_cancer_types_other",2098,"Other cancer","Cancer",87
+"1615",1615,"Fever of unknown origin","Infection/Parasites",86
+"120",120,"Uveitis","Eye",84
+"707",707,"Bloat with torsion (GDV)","Gastrointestinal",83
+"911",911,"Proteinuria","Kidney/Urinary",82
+"118",118,"Progressive retinal atrophy","Eye",81
+"604",604,"Chronic or recurrent bronchitis","Respiratory",81
+"429",429,"Seborrhea or seborrheic dermatitis (greasy skin)","Skin",80
+"1407",1407,"Anemia","Hematopoietic",79
+"906",906,"Acute kidney failure","Kidney/Urinary",76
+"115",115,"Juvenile cataracts","Eye",74
+"hs_cancer_types_melanoma",2021,"Melanoma","Cancer",73
+"1204",1204,"Degenerative myelopathy","Brain/Neurologic",71
+"607",607,"Elongated soft palate","Respiratory",69
+"1014",1014,"Pyometra","Reproductive",68
+"421",421,"Pododermatitis","Skin",65
+"hs_cancer_types_carcinoma",2004,"Carcinoma","Cancer",63
+"114",114,"Iris cyst","Eye",60
+"606",606,"Chronic or recurrent rhinitis","Respiratory",60
+"1628",1628,"MRSA/MRSP","Infection/Parasites",60
