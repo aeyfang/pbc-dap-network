@@ -10,6 +10,7 @@ For those interested in investigating comorbidities in the undirected, unstratif
 
 - **Explore individual condition relationships**
 - **Filter networks by disease categories** or specific conditions
+- **Toggle easily between** unstratified, age-stratified, and directed networks
 - **Search for specific diseases** of interest
 
 ## Overview
