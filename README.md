@@ -2,6 +2,16 @@
 
 This repository contains the code used to analyze comorbidity networks in companion dogs using data from the Dog Aging Project (DAP). The analysis creates both undirected and time-directed comorbidity networks, adjusting for demographic covariates using a novel Poisson binomial approach.
 
+## Interactive Exploration
+
+**🌐 [Explore the Interactive Comorbidity Network](https://aeyfang.shinyapps.io/interactve_dog_comorbidity_network/)**
+
+For those interested in investigating comorbidities in greater detail, we have developed an interactive Shiny application that allows you to:
+
+- **Explore individual condition relationships**
+- **Filter networks by disease categories** or specific conditions
+- **Search for specific diseases** of interest
+
 ## Overview
 
 The analysis pipeline processes owner-reported health data from the Dog Aging Project to identify statistically significant associations between health conditions. The methods use a Poisson binomial approach to account for individual-level covariates (age, sex, sterilization status, breed background, and weight) without requiring stratification, enabling more robust comorbidity detection than traditional methods.
