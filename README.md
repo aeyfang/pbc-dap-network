@@ -6,7 +6,7 @@ This repository contains the code used to analyze comorbidity networks in compan
 
 **🌐 [Explore the Interactive Comorbidity Network](https://aeyfang.shinyapps.io/interactve_dog_comorbidity_network/)**
 
-For those interested in investigating comorbidities in greater detail, we have developed an interactive Shiny application that allows you to:
+For those interested in investigating comorbidities in the undirected, unstratified network in greater detail, we have developed an interactive Shiny application that allows you to:
 
 - **Explore individual condition relationships**
 - **Filter networks by disease categories** or specific conditions
